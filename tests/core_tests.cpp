@@ -5817,8 +5817,18 @@ int main() {
         check(!t.done(),"paused: nothing counts");
         check(pokeAt(Choice::end)==Choice::end && t.stage()==Stage::off,"END closes it");
         Tutorial u(Wording{ControllerKind::index,false});
-        check(buttonName('X',ControllerKind::index)=="LEFT A" && buttonName('Y',ControllerKind::index)=="LEFT B",
+        check(buttonName('X',ControllerKind::index)=="LEFT A BUTTON" &&
+                  buttonName('Y',ControllerKind::index)=="LEFT B BUTTON",
               "the Index names its own buttons");
+        // Every Index card names the Index's own controls, never another controller's.
+        for (const auto& s : steps({ControllerKind::index,false}))
+            for (const auto& line : s.lines) {
+                check(line.find("MENU")==std::string::npos && line.find("LEFT STICK")==std::string::npos &&
+                          line.find("RIGHT STICK")==std::string::npos,
+                      "an Index card names a control the Index lacks");
+                for (const char* bare : {" X ", " Y ", " X:", " Y:"})
+                    check((" "+line+" ").find(bare)==std::string::npos,"an Index card names X or Y");
+            }
         bool trackpad=false;
         for (const auto& s : steps({ControllerKind::index,false}))
             for (const auto& line : s.lines)
