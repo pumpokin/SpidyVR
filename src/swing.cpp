@@ -73,6 +73,13 @@ Swing::Swing(SwingConfig c) : config_(c) {
         throw std::invalid_argument("Invalid physical web");
     if (c.groundClearance > 0 && !(c.groundTurn > 0))
         throw std::invalid_argument("Invalid ground clearance");
+    if (!std::isfinite(c.armSensitivity) || c.armSensitivity <= 0 || c.armSensitivity > 10)
+        throw std::invalid_argument("Invalid arm sensitivity");
+}
+void Swing::setArmSensitivity(float sensitivity) {
+    if (!std::isfinite(sensitivity) || sensitivity <= 0 || sensitivity > 10)
+        throw std::invalid_argument("Invalid arm sensitivity");
+    config_.armSensitivity = sensitivity;
 }
 void Swing::allowPhysical(bool allowed) {
     config_.physical = allowed;
@@ -759,7 +766,10 @@ void Swing::inputs(float dt, const Input& in, const WorldQueries& world) {
             if (s.sample) {
                 const Vec3 was = s.offset;
                 s.offset += limited(offset - s.offset, config_.maxHandSpeed * dt);
-                s.rate = limited(turn.rotate(h.gripRelativeToHead - s.previous) / over, config_.maxHandSpeed);
+                // The arm's motion as it counts (armSensitivity).
+                const float arm = config_.armSensitivity;
+                s.rate = limited(turn.rotate(h.gripRelativeToHead - s.previous) / over * arm,
+                                 config_.maxHandSpeed * std::max(arm, 1.f));
                 // Toward the web's end the hand makes slack; back from it, it
                 // takes that up first (SwingConfig::taut).
                 if (w.attached)
@@ -828,7 +838,8 @@ void Swing::inputs(float dt, const Input& in, const WorldQueries& world) {
             // Head-relative samples remove virtual movement and room-scale translation.
             if (s.sample && !s.zipUsed && bears(i)) {
                 const Vec3 delta = trackingTurn(in).rotate(h.gripRelativeToHead - s.previous);
-                const float pull = -dot(delta, normalized(w.anchor - body_.position));
+                // As far as the arm's motion counts (armSensitivity).
+                const float pull = -dot(delta, normalized(w.anchor - body_.position)) * config_.armSensitivity;
                 if (pull > 0) {
                     s.pullDistance += pull;
                     s.pullTime += dt;

@@ -62,6 +62,10 @@ struct Values {
     // depth there (the tab's GAME SCREEN 3D): 0 off, the game's flat frame; 1
     // low, 2 medium, 3 high (screenDepths).
     int screenDepth = 2;
+    // How much your arm's motion counts for while a web holds you, percent
+    // (the tab's ARM SENSITIVITY; SwingConfig::armSensitivity): higher, a
+    // smaller, slower pull drags you along the web and a gentler yank zips.
+    int armSensitivity = 100;
     bool operator==(const Values&) const = default;
 };
 // The steps the game's Settings offer. The launcher's slider sets any swing
@@ -72,6 +76,11 @@ inline constexpr int smoothTurns[] = {0, 60, 90, 120, 180, 240};
 inline constexpr int hapticLevels[] = {0, 25, 50, 75, 100};
 inline constexpr int weights[] = {40, 60, 80, 100, 125, 150, 200, 250, 300};
 inline constexpr int flipSpeeds[] = {90, 120, 150, 180, 240, 300, 360, 480};
+inline constexpr int armSensitivities[] = {50, 75, 100, 125, 150, 200, 300};
+// The swing's factor for an ARM SENSITIVITY percent.
+inline float armFactor(int percent) {
+    return static_cast<float>(percent < 25 ? 25 : percent > 400 ? 400 : percent) / 100;
+}
 // Real gravity, m/s^2: a weight of 100% falls at it.
 inline constexpr float realGravity = 9.81f;
 // The swing's gravity for a weight, m/s^2.
@@ -98,7 +107,7 @@ inline float screenDepth(int choice) {
 // The values within the session's ranges: swing speed 1-65 m/s (what
 // run_game_vr.py accepts), snap turn 0-90 degrees, smooth turn 0-360 degrees
 // a second, vibration 0-100%, weight 40-300%, HUD 0-3, flip speed 90-480
-// degrees a second, the game screen's depth 0-3.
+// degrees a second, the game screen's depth 0-3, arm sensitivity 25-400%.
 Values sanitized(Values);
 
 enum class Item : uint8_t {
@@ -119,8 +128,9 @@ enum class Item : uint8_t {
     standOnWalls,
     screenDepth,
     view,
+    armSensitivity,
 };
-inline constexpr Item lastItem = Item::view;
+inline constexpr Item lastItem = Item::armSensitivity;
 // The SPIDY VR tab, top to bottom: a section's heading (item none) or a
 // setting. A setting without choices is an ON/OFF switch, the game's own;
 // one with choices steps through them. Titles are upper case, as the game's
@@ -135,7 +145,7 @@ struct Row {
     // menu (the one with resume)").
     bool page{};
 };
-const std::array<Row, 19>& rows();
+const std::array<Row, 21>& rows();
 // The choice a setting shows for these values: a switch 0 (off) or 1 (on), a
 // list its step nearest to the value (a launcher value between two steps
 // shows the nearer one, the lower on a tie).

@@ -156,6 +156,12 @@ struct SwingConfig {
     // limit ("throw me too much", "the wind is too strong", "i want the near
     // misses"). 0: none.
     float groundClearance = 0, groundTurn = 15;
+    // Arm sensitivity (the VR settings' ARM SENSITIVITY): how much a hand's
+    // motion counts for. A hand pulling on its web pulls the body after it at
+    // this times the hand's speed (maxHandSpeed times it at most), and a yank
+    // counts this times as far and as fast toward a zip (yankDistance and
+    // yankSpeed), its impulse too. 1: as the arm moved.
+    float armSensitivity = 1;
 };
 // The edges one web bends round at most (SwingConfig::physical).
 constexpr int maxBends = 6;
@@ -289,6 +295,8 @@ class Swing {
     // A new gravity during play (the VR settings' weight), m/s^2, from the
     // next step.
     void setGravity(float gravity);
+    // SwingConfig::armSensitivity, from the next step (above 0, 10 at most).
+    void setArmSensitivity(float sensitivity);
     // Whether a clear shot attaches in the air at maximum reach from now on
     // (the VR settings); off, it misses. Webs already attached
     // keep their anchors.

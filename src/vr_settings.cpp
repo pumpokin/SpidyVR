@@ -25,6 +25,7 @@ constexpr const char* hudChoices[] = {"OFF", "SMALL", "MEDIUM", "LARGE"};
 constexpr const char* flipSpeedChoices[] = {"90\xC2\xB0/S",  "120\xC2\xB0/S", "150\xC2\xB0/S", "180\xC2\xB0/S",
                                             "240\xC2\xB0/S", "300\xC2\xB0/S", "360\xC2\xB0/S", "480\xC2\xB0/S"};
 constexpr const char* depthChoices[] = {"OFF", "LOW", "MEDIUM", "HIGH"};
+constexpr const char* armChoices[] = {"50%", "75%", "100%", "125%", "150%", "200%", "300%"};
 constexpr int screenSizes[] = {0, 1, 2};
 constexpr int hudSizes[] = {0, 1, 2, 3};
 constexpr int depthSteps[] = {0, 1, 2, 3};
@@ -33,7 +34,8 @@ static_assert(std::size(swingChoices) == std::size(swingSpeeds) && std::size(sna
               std::size(hapticChoices) == std::size(hapticLevels) && std::size(screenChoices) == std::size(screenSizes) &&
               std::size(weightChoices) == std::size(weights) && std::size(hudChoices) == std::size(hudSizes) &&
               std::size(flipSpeedChoices) == std::size(flipSpeeds) &&
-              std::size(depthChoices) == std::size(depthSteps) && std::size(depthSteps) == std::size(screenDepths));
+              std::size(depthChoices) == std::size(depthSteps) && std::size(depthSteps) == std::size(screenDepths) &&
+              std::size(armChoices) == std::size(armSensitivities));
 // A list setting's steps, or none for a switch.
 std::span<const int> steps(Item item) {
     switch (item) {
@@ -55,6 +57,8 @@ std::span<const int> steps(Item item) {
         return flipSpeeds;
     case Item::screenDepth:
         return depthSteps;
+    case Item::armSensitivity:
+        return armSensitivities;
     default:
         return {};
     }
@@ -79,6 +83,8 @@ float numberOf(Item item, const Values& v) {
         return static_cast<float>(v.flipSpeed);
     case Item::screenDepth:
         return static_cast<float>(v.screenDepth);
+    case Item::armSensitivity:
+        return static_cast<float>(v.armSensitivity);
     default:
         return 0;
     }
@@ -116,11 +122,12 @@ Values sanitized(Values v) {
     v.hud = std::clamp(v.hud, 0, 3);
     v.flipSpeed = std::clamp(v.flipSpeed, 90, 480);
     v.screenDepth = std::clamp(v.screenDepth, 0, 3);
+    v.armSensitivity = std::clamp(v.armSensitivity, 25, 400);
     return v;
 }
-const std::array<Row, 19>& rows() {
+const std::array<Row, 21>& rows() {
     // The help fits the game's description column beside the rows.
-    static const std::array<Row, 19> all{{
+    static const std::array<Row, 21> all{{
         {Item::none, "WEBS", nullptr, {}},
         {Item::webButton, "WEB BUTTON",
          "Which button shoots and holds a web; the other reels in and shoots web balls.", webButtonChoices},
@@ -152,6 +159,10 @@ const std::array<Row, 19>& rows() {
         {Item::flips, "FLIPS", "In the air the left stick turns you over; tap A for one flip, hold A to stay.", {}},
         {Item::flipSpeed, "FLIP SPEED", "How fast a flip turns you over, at full tilt of the left stick.",
          flipSpeedChoices},
+        {Item::none, "ARMS", nullptr, {}},
+        {Item::armSensitivity, "ARM SENSITIVITY",
+         "Higher: a smaller arm pull swings you along a web, and a gentler yank zips.",
+         armChoices},
     }};
     return all;
 }
@@ -207,6 +218,9 @@ bool choose(Item item, int index, Values& v) {
         break;
     case Item::screenDepth:
         v.screenDepth = s[index];
+        break;
+    case Item::armSensitivity:
+        v.armSensitivity = s[index];
         break;
     default:
         return false;

@@ -2593,6 +2593,33 @@ int main() {
         }
         near(length(s.body().velocity), 0);
     });
+    test("arm sensitivity: a gentler pull zips when higher, a sharp one does not when lower", [] {
+        // A steady pull at 0.6 m/s: no zip as the arm moved, one at 300%.
+        const auto zipsAt=[](float arm,float step) {
+            TestWorld w;
+            auto config=inert();
+            config.armSensitivity=arm;
+            Swing s(config);
+            auto in = aimed();
+            s.update(.01f, in, w);
+            int zips = 0;
+            for (int i = 0; i < 20; ++i) {
+                in.hands[0].gripRelativeToHead.y -= step;
+                s.update(.01f, in, w);
+                for (auto e : s.events())
+                    zips += e.kind == EventKind::Zip;
+            }
+            return zips;
+        };
+        check(zipsAt(1,.006f)==0,"a gentle pull zips as the arm moved");
+        check(zipsAt(3,.006f)==1,"a gentle pull does not zip at 300%");
+        check(zipsAt(1,.03f)==1 && zipsAt(.4f,.03f)==0,"a sharp yank zips at 100% and not at 40%");
+        Swing s(inert());
+        bool refused=false;
+        try { s.setArmSensitivity(0); } catch (const std::invalid_argument&) { refused=true; }
+        check(refused,"no arm sensitivity of 0");
+        s.setArmSensitivity(2);
+    });
     test("virtual travel cannot trigger yank", [] {
         TestWorld w;
         Swing s(inert());
@@ -8715,13 +8742,24 @@ int main() {
             for (const char* c : row.choices)
                 check(c && *c, "an empty choice");
         }
-        check(headings == 4 && all[0].item == Item::none && all[6].item == Item::none && all[8].item == Item::none &&
+        check(headings == 5 && all[0].item == Item::none && all[6].item == Item::none && all[8].item == Item::none &&
                   all[16].item == Item::none,
               "the sections: webs, body, comfort, experimental");
         check(all[17].item == Item::flips && all[17].choices.empty() && std::strcmp(all[16].title, "EXPERIMENTAL") == 0,
               "the flips: a switch under EXPERIMENTAL");
-        check(all.size() == 19 && all[18].item == Item::flipSpeed && all[18].choices.size() == std::size(flipSpeeds),
-              "the flip speed under the flips, the last row");
+        check(all.size() == 21 && all[18].item == Item::flipSpeed && all[18].choices.size() == std::size(flipSpeeds),
+              "the flip speed under the flips");
+        check(all[19].item == Item::none && std::strcmp(all[19].title, "ARMS") == 0 &&
+                  all[20].item == Item::armSensitivity && all[20].choices.size() == std::size(armSensitivities),
+              "arm sensitivity under ARMS, the last row");
+        {
+            Values v;
+            check(v.armSensitivity == 100 && choice(Item::armSensitivity, v) == 2 &&
+                      defaultChoice(Item::armSensitivity) == 2 && choose(Item::armSensitivity, 6, v) &&
+                      v.armSensitivity == 300 && !choose(Item::armSensitivity, 7, v) &&
+                      armFactor(v.armSensitivity) == 3.f && sanitized(Values{.armSensitivity = 9000}).armSensitivity == 400,
+                  "ARM SENSITIVITY: 50% to 300%, 100% by default");
+        }
         // The wall view has no row of its own any more: it turned only while
         // Spidy held the player on a wall, so it was never a choice of its own
         // and the launcher's one "Wall running" now carries both (the player,

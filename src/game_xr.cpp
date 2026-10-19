@@ -43,6 +43,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <mutex>
 #include <stdexcept>
@@ -421,6 +422,41 @@ std::wstring tutorialPath() {
     CreateDirectoryW(path.c_str(), nullptr);
     return path + L"\\tutorial.txt";
 }
+// ARM SENSITIVITY, kept between sessions beside the tutorial's answer
+// (%LOCALAPPDATA%\Spidy\arm_sensitivity.txt, a percent): the launcher does not
+// carry it. 0: none kept.
+std::wstring armPath() {
+    const auto tutorial = tutorialPath();
+    if (tutorial.empty())
+        return {};
+    return tutorial.substr(0, tutorial.find_last_of(L'\\') + 1) + L"arm_sensitivity.txt";
+}
+int keptArmSensitivity() {
+    const auto path = armPath();
+    if (path.empty())
+        return 0;
+    const HANDLE file = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+                                    FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE)
+        return 0;
+    char text[16]{};
+    DWORD got{};
+    ReadFile(file, text, sizeof(text) - 1, &got, nullptr);
+    CloseHandle(file);
+    return std::atoi(text);
+}
+void keepArmSensitivity(int percent) {
+    const auto path = armPath();
+    if (path.empty())
+        return;
+    const HANDLE file = CreateFileW(path.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE)
+        return;
+    const auto text = std::to_string(percent);
+    DWORD written{};
+    WriteFile(file, text.data(), static_cast<DWORD>(text.size()), &written, nullptr);
+    CloseHandle(file);
+}
 bool tutorialAnswered() {
     const auto path = tutorialPath();
     return !path.empty() && GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES;
@@ -786,7 +822,10 @@ DWORD WINAPI run(void*) {
         values.hud = static_cast<int>(config.hud);
         values.flipSpeed = static_cast<int>(config.flipSpeed);
         values.screenDepth = static_cast<int>(config.screenDepth);
+        if (const int arm = keptArmSensitivity(); arm > 0)
+            values.armSensitivity = arm;
         values = vr_settings::sanitized(values);
+        int keptArm = values.armSensitivity;
         game_menu::publish(values);
         uint32_t settingChanges{};
         // aims are each hand's latest preview.
@@ -1039,6 +1078,7 @@ DWORD WINAPI run(void*) {
                 s.maxSpeed = values.swingSpeed;
                 s.airWebs = values.airWebs;
                 s.gravity = vr_settings::gravity(values.weight);
+                s.armSensitivity = vr_settings::armFactor(values.armSensitivity);
                 s.walls = !(config.options & 16384);
                 sentSwingSettings = s;
                 swingSettingsSent = true;
@@ -1425,6 +1465,10 @@ DWORD WINAPI run(void*) {
                     if (game_menu::take(values)) {
                         ++settingChanges;
                         applySettings();
+                        if (values.armSensitivity != keptArm) {
+                            keptArm = values.armSensitivity;
+                            keepArmSensitivity(keptArm);
+                        }
                     }
                     game_menu::publish(values);
                     const uint32_t gate =
