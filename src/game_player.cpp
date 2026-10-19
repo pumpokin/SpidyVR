@@ -14,6 +14,8 @@ __declspec(dllexport) DWORD WINAPI SpidyPlayerFind(void* output);
 namespace {
 constexpr uintptr_t registryTable = 0x7a44320, registryCount = 0x7a44340;
 constexpr uintptr_t heroLocal = 0x38a93c8, heroMover = 0x38b2c98, moverStandard = 0x4f70168;
+// The hero's Health (tools/probe_game_body.py HERO_HEALTH); hit points at +0x88.
+constexpr uintptr_t heroHealthVtable = 0x38a6df0, hitPointsOffset = 0x88;
 bool read(uintptr_t p, void* out, size_t n) {
     __try {
         if (p < 0x10000)
@@ -138,6 +140,42 @@ bool game_player::live(uintptr_t base, const Player& p) {
            registered(r, p.mover, base + moverStandard, p.record) && transform(pointer(p.record));
 }
 
+uintptr_t game_player::heroHealth(uintptr_t base, uintptr_t record) {
+    Registry r;
+    if (!record || !registry(base, r))
+        return 0;
+    uintptr_t found{};
+    for (uint32_t i = 0; i < r.count; ++i) {
+        uintptr_t address{};
+        uint32_t generation{};
+        if (!read(r.table + i * 16, &address, 8) || !read(r.table + i * 16 + 8, &generation, 4) ||
+            address < 0x10000 || address % 8 || !generation || generation > 0xfff)
+            continue;
+        if (pointer(address) != base + heroHealthVtable || pointer(address + 8) != record)
+            continue;
+        uint32_t handle{};
+        if (!read(address + 0x14, &handle, 4) || handle != (generation << 20 | i))
+            continue;
+        // Two on one actor: no telling which is his.
+        if (found)
+            return 0;
+        found = address;
+    }
+    return found;
+}
+bool game_player::healthLive(uintptr_t base, uintptr_t health, uintptr_t record) {
+    Registry r;
+    return health && registry(base, r) && registered(r, health, base + heroHealthVtable, record);
+}
+bool game_player::hitPoints(uintptr_t health, float& out) {
+    float points{};
+    if (!health || !read(health + hitPointsOffset, &points, sizeof(points)) || !std::isfinite(points) ||
+        points < 0 || points > 1e6f)
+        return false;
+    out = points;
+    return true;
+}
+
 void Watch::start(uintptr_t base) {
     stop();
     base_ = base;
@@ -158,18 +196,38 @@ Player Watch::current(uint64_t& changes) const {
     changes = changes_;
     return player_;
 }
+uintptr_t Watch::health() const {
+    std::lock_guard lock(lock_);
+    return health_;
+}
 void Watch::run() {
     Player known{};
+    uintptr_t health{};
+    // A player with no health found is searched again once a second, not at
+    // every check: a registry scan takes a few milliseconds.
+    int healthWait{};
     for (;;) {
         Player next = known;
         // A live player is checked in microseconds; only a lost one is searched for.
         if (!known.hero || !live(base_, known))
             find(base_, next);
+        // His health the same way: kept while it stays on his actor.
+        if (!next.hero) {
+            health = 0;
+            healthWait = 0;
+        } else if (!(next == known) || (health && !healthLive(base_, health, next.record))) {
+            health = heroHealth(base_, next.record);
+            healthWait = 10;
+        } else if (!health && --healthWait <= 0) {
+            health = heroHealth(base_, next.record);
+            healthWait = 10;
+        }
         std::unique_lock lock(lock_);
         if (!(next == player_)) {
             player_ = next;
             ++changes_;
         }
+        health_ = health;
         known = next;
         // A level change replaces the player within a second or two; look
         // often until it is back, then check it at the headset's pace.

@@ -35,6 +35,8 @@
 #include "spidy/slow_motion.hpp"
 #include "spidy/vr_settings.hpp"
 #include "spidy/web_pull.hpp"
+#include "spidy/tutorial.hpp"
+#include "spidy/wrist_hud.hpp"
 #include "spidy/xr_layers.hpp"
 #include "spidy/xr_session.hpp"
 #include <algorithm>
@@ -407,6 +409,33 @@ DWORD WINAPI SpidySetEyes(void*);
 float SpidyFlatAspect();
 }
 namespace {
+// The tutorial's answer, kept between sessions: %LOCALAPPDATA%\Spidy\tutorial.txt
+// holds "never" or "done" once the player has answered for good. Deleting it
+// (Replay Spidy tutorial.cmd) offers the tutorial again.
+std::wstring tutorialPath() {
+    wchar_t folder[MAX_PATH]{};
+    const DWORD n = GetEnvironmentVariableW(L"LOCALAPPDATA", folder, MAX_PATH);
+    if (!n || n >= MAX_PATH)
+        return {};
+    std::wstring path = std::wstring(folder) + L"\\Spidy";
+    CreateDirectoryW(path.c_str(), nullptr);
+    return path + L"\\tutorial.txt";
+}
+bool tutorialAnswered() {
+    const auto path = tutorialPath();
+    return !path.empty() && GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES;
+}
+void tutorialRemember(const char* answer) {
+    const auto path = tutorialPath();
+    if (path.empty())
+        return;
+    const HANDLE file = CreateFileW(path.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE)
+        return;
+    DWORD written{};
+    WriteFile(file, answer, static_cast<DWORD>(std::strlen(answer)), &written, nullptr);
+    CloseHandle(file);
+}
 using BridgeCall = DWORD(WINAPI*)(void*);
 XrConfig config;
 BridgeCall submitInput{}, sampleBridge{}, stopBridge{}, retargetBridge{};
@@ -649,6 +678,11 @@ DWORD WINAPI run(void*) {
         // The right thumbstick pushed down is the game's D-pad down (heal),
         // pushed up its LT + RT (the zip to a point, a vent).
         game_pad::StickPush stickPush;
+        // The wrist HUD (wrist_hud.hpp): the player's health over the left
+        // wrist, and its heal button, poked with the right index finger.
+        wrist_hud::Health wristHealth;
+        wrist_hud::HealButton healButton;
+        bool wristHeal{};
         bool interacting{}, dodging{}, healing{}, zipping{};
         uint32_t interacts{}, dodges{}, heals{}, zips{};
         // The whole pad, latched by clicking both thumbsticks, for the
@@ -902,6 +936,13 @@ DWORD WINAPI run(void*) {
         // From the calibration's start until each is let go after it, the
         // triggers, grips, A and B do nothing in the game (B skips it).
         bool calibrationInput{}, skipHeld{};
+        // The VR tutorial (tutorial.hpp): offered once at the first gameplay
+        // unless answered in an earlier session; what the player did this
+        // frame, for its cards; the controllers and web button it is worded for.
+        tutorial::Tutorial tutor;
+        tutorial::Events tutorialSeen{};
+        bool tutorialAsked = tutorialAnswered();
+        tutorial::Wording tutorialWording{};
         uint32_t calibrations{}, calibrationSkips{};
         LARGE_INTEGER frequency{};
         QueryPerformanceFrequency(&frequency);
@@ -1486,6 +1527,18 @@ DWORD WINAPI run(void*) {
                             runtime.haptic(1, .15f);
                         }
                     }
+                    // The tutorial is offered once the calibration is over (or
+                    // was never wanted), VR has shown play a moment and no web
+                    // flies the player.
+                    if (!tutorialAsked && tutor.stage() == tutorial::Stage::off &&
+                        calibration.phase() == CalibrationPhase::idle && !calibrationInput && immersive &&
+                        nowMs - immersiveSince >= 2500 && !swingState.owned) {
+                        tutorialAsked = true;
+                        tutor.offer(frame.head);
+                        runtime.haptic(0, .25f);
+                        runtime.haptic(1, .25f);
+                        message(3, 0, "Tutorial offered: poke START, NOT NOW or NEVER ASK with a finger");
+                    }
                     if (calibrationInput && calibration.phase() == CalibrationPhase::idle) {
                         bool held = (frame.buttons & buttonB) || frame.jump;
                         for (const auto& hand : frame.hands)
@@ -1731,6 +1784,8 @@ DWORD WINAPI run(void*) {
                                             webShooter(motion.grips[i], i).position,
                                             frame.predictedDisplayTime);
                         }
+                        if (input.focused && swingState.status && swingState.zips > zipBefore)
+                            tutorialSeen.zip = true;
                         zipBefore = swingState.zips;
                         {
                             // One web in both hands is one of the game's ropes,
@@ -1762,6 +1817,8 @@ DWORD WINAPI run(void*) {
                             runtime.haptic(0, pulse);
                             runtime.haptic(1, pulse);
                         }
+                        if (input.focused && swingState.status && swingState.walls > wallsBefore)
+                            tutorialSeen.wall = true;
                         wallsBefore = swingState.walls;
                         wallJumpsBefore = swingState.wallJumps;
                         // Every landed blow, a fist's or a web strike's: the hand
@@ -1791,6 +1848,10 @@ DWORD WINAPI run(void*) {
                             if (strikes.blows > blowsBefore && input.focused) {
                                 const auto kind = static_cast<BlowKind>(strikes.lastKind);
                                 const bool called = strikes.lastCalled != 0;
+                                tutorialSeen.punch = true;
+                                tutorialSeen.called = tutorialSeen.called || called;
+                                tutorialSeen.uppercut = tutorialSeen.uppercut || kind == BlowKind::Launch;
+                                tutorialSeen.slam = tutorialSeen.slam || kind == BlowKind::Slam;
                                 const bool finisher = kind == BlowKind::Finisher,
                                            heavy = kind != BlowKind::Hit || called;
                                 // Time slows for a moment at the blows worth a look.
@@ -1869,6 +1930,7 @@ DWORD WINAPI run(void*) {
                                 // into the hand, as hard as it was; the web's rumble
                                 // waits for it.
                                 if (!fighting && punch.hands[i].punches > punchesBefore[i] && input.focused) {
+                                    tutorialSeen.punch = true;
                                     runtime.haptic(i, .5f + .5f * punch.hands[i].lastStrength);
                                     pulseUntil[i] = frame.predictedDisplayTime + 40'000'000;
                                 }
@@ -1880,6 +1942,7 @@ DWORD WINAPI run(void*) {
                             for (unsigned i = 0; i < 2; ++i) {
                                 // A web ball leaving the wrist: a short, crisp tick.
                                 if (shots.hands[i].shots > shotsBefore[i] && input.focused) {
+                                    tutorialSeen.shot = true;
                                     runtime.haptic(i, .35f);
                                     pulseUntil[i] = frame.predictedDisplayTime + 25'000'000;
                                     ballShot[i] = true;
@@ -2215,7 +2278,26 @@ DWORD WINAPI run(void*) {
                         const auto push = stickPush.update(frame.seconds, steering && !calibrationInput && !layerOn,
                                                            turning.valid ? turning.stickX : 0,
                                                            turning.valid ? turning.stickY : 0);
-                        walk.heal = push == game_pad::StickPush::Way::down;
+                        // The wrist HUD's heal button, poked with the right index
+                        // finger: only a pointing hand (trigger and grip let go,
+                        // no web in it) presses it, so a swing never heals.
+                        {
+                            const auto& left = frame.hands[0];
+                            const auto& right = frame.hands[1];
+                            const bool pointing = left.valid && right.valid && right.trigger < .5f &&
+                                                  right.squeeze < .5f &&
+                                                  !(swingState.status && swingState.webs[1].attached);
+                            const auto wrist = wrist_hud::layout(Pose{left.grip.position, left.aim.orientation},
+                                                                 frame.head.position);
+                            wristHeal = healButton.update(
+                                frame.seconds, steering && !calibrationInput && !layerOn && pointing,
+                                wrist_hud::fingertip(Pose{right.grip.position, right.aim.orientation}), wrist);
+                            if (healButton.pressedNow()) {
+                                runtime.haptic(0, .25f);
+                                runtime.haptic(1, .35f);
+                            }
+                        }
+                        walk.heal = push == game_pad::StickPush::Way::down || wristHeal;
                         walk.zip = reaching && push == game_pad::StickPush::Way::up;
                         if ((walk.heal && !healing) || (walk.zip && !zipping))
                             runtime.haptic(1, .2f);
@@ -2288,6 +2370,7 @@ DWORD WINAPI run(void*) {
                                 runtime.haptic(hand, .12f);
                             if (chosen.chosen >= 0) {
                                 runtime.haptic(hand, .5f);
+                                tutorialSeen.gadget = true;
                                 game_shooter::GadgetCommand command;
                                 for (uint32_t g = 0; g < owned; ++g)
                                     if (listed.gadgets[g].place == chosen.chosen)
@@ -2315,6 +2398,10 @@ DWORD WINAPI run(void*) {
                             game_prompts::note(line);
                         }
                         interacting = walk.interact;
+                        tutorialSeen.dodge = tutorialSeen.dodge || (walk.dodge && !dodging);
+                        tutorialSeen.heal = tutorialSeen.heal || (walk.heal && !healing);
+                        tutorialSeen.zip = tutorialSeen.zip || (walk.zip && !zipping);
+                        tutorialSeen.jump = tutorialSeen.jump || walk.jump;
                         dodges += walk.dodge && !dodging;
                         dodging = walk.dodge;
                         heals += walk.heal && !healing;
@@ -2696,6 +2783,27 @@ DWORD WINAPI run(void*) {
                     saved.screenPose = screenPose;
                     saved.screenAspect = SpidyFlatAspect();
                     saved.slow = moments.view(slowMotion.view());
+                    // The wrist HUD: the player's health as the game has it now,
+                    // and the heal button as the finger left it.
+                    {
+                        const auto component = players.health();
+                        float points{};
+                        const bool known = component && game_player::hitPoints(component, points);
+                        wristHealth.update(frame.seconds, known, points, component);
+                        auto& w = saved.wrist;
+                        w.shown = steering && mapping == game_pad::Mapping::gameplay;
+                        w.known = wristHealth.known();
+                        w.health = wristHealth.fraction();
+                        w.trail = wristHealth.trail();
+                        w.hurt = wristHealth.hurt();
+                        w.healed = wristHealth.healed();
+                        w.hover = healButton.hover();
+                        w.pressed = healButton.held();
+                        // The tracking space's up in this frame's world, so the
+                        // eyes lay it out as the finger found it.
+                        const Pose toWorld = compose(motion.headPose, inverse(frame.head));
+                        w.up = toWorld.orientation.rotate({0, 1, 0});
+                    }
                     if (gadgetWheel.open()) {
                         // The gadget wheel, from tracking space into this frame's
                         // world, with the gadgets in their places.
@@ -2743,6 +2851,42 @@ DWORD WINAPI run(void*) {
                         for (unsigned i = 0; i < 2; ++i) {
                             view.handTracked[i] = frame.hands[i].valid && validTrackedPose(frame.hands[i].grip);
                             view.grips[i] = motion.grips[i];
+                        }
+                    }
+                    // The tutorial: its card follows what the player did this frame,
+                    // and pokes of either index finger press its buttons.
+                    {
+                        const tutorial::Wording wording{runtime.controllers()[1], values.triggerWebs};
+                        if (wording.controller != tutorialWording.controller ||
+                            wording.triggerWebs != tutorialWording.triggerWebs) {
+                            tutorialWording = wording;
+                            tutor.wording(wording);
+                        }
+                        tutorial::Fingers fingers;
+                        for (unsigned i = 0; i < 2; ++i) {
+                            const auto& h = frame.hands[i];
+                            const bool webbed = swingState.status && swingState.webs[i].attached;
+                            fingers.pointing[i] = h.valid && h.trigger < .5f && h.squeeze < .5f && !webbed;
+                            fingers.tips[i] = wrist_hud::fingertip(Pose{h.grip.position, h.aim.orientation});
+                            tutorialSeen.webAttached = tutorialSeen.webAttached || webbed;
+                            const float reel = values.triggerWebs ? h.squeeze : h.trigger;
+                            tutorialSeen.reeling = tutorialSeen.reeling || (webbed && reel > .5f);
+                        }
+                        tutorialSeen.slow = slowMotion.active();
+                        const auto choice = tutor.update(frame.seconds, immersive, frame.head, fingers, tutorialSeen);
+                        tutorialSeen = {};
+                        if (choice != tutorial::Choice::none) {
+                            runtime.haptic(0, .2f);
+                            runtime.haptic(1, .2f);
+                        }
+                        if (choice == tutorial::Choice::never)
+                            tutorialRemember("never");
+                        else if (choice == tutorial::Choice::end || choice == tutorial::Choice::finish)
+                            tutorialRemember("done");
+                        if (tutor.stage() != tutorial::Stage::off && immersive) {
+                            saved.tutorial = tutor.view();
+                            saved.tutorial.card =
+                                compose(compose(motion.headPose, inverse(frame.head)), tutor.card());
                         }
                     }
                     history.remember(saved);
@@ -3012,12 +3156,20 @@ DWORD WINAPI run(void*) {
                             appendAimMarker(translucent, mark, viewer, pixelAngle * markerPixels);
                         // Slow motion's focus meter over the back of the left wrist, moved
                         // with the player to this image as the glove is.
-                        if (!saved->flatScreen && saved->slow.meter > 0 && rendered.swing.hands[0].tracked) {
+                        // With the wrist HUD the ring always shows, beside the
+                        // health bar and the heal button above it.
+                        if (!saved->flatScreen && (saved->slow.meter > 0 || saved->wrist.shown) &&
+                            rendered.swing.hands[0].tracked) {
                             auto wrist = rendered.hands[0];
                             wrist.position += travel;
                             const double clock = std::fmod(static_cast<double>(shown) * 1e-9, 3600.);
-                            appendSlowMotionMeter(translucent, saved->slow, wrist, viewer, pixelAngle,
+                            auto slow = saved->slow;
+                            if (saved->wrist.shown)
+                                slow.meter = std::max(slow.meter, .8f);
+                            appendSlowMotionMeter(translucent, slow, wrist, viewer, pixelAngle,
                                                   static_cast<float>(clock));
+                            appendWristHud(translucent, saved->wrist, wrist, viewer, pixelAngle,
+                                           static_cast<float>(clock));
                         }
                         // The bursts where the latest blows landed: fixed in the world.
                         if (!saved->flatScreen)
@@ -3052,6 +3204,12 @@ DWORD WINAPI run(void*) {
                             for (auto& grip : view.grips)
                                 grip.position += travel;
                             body_calibration::appendView(vertices, view, viewer);
+                        }
+                        // The tutorial's card, moved with the player as the panel is.
+                        if (!saved->flatScreen && saved->tutorial.stage != tutorial::Stage::off) {
+                            auto view = saved->tutorial;
+                            view.card.position += travel;
+                            tutorial::appendView(vertices, view, viewer);
                         }
                         // The gadget wheel in front of its hand, moved with the
                         // player to this image as the hands are.

@@ -5,6 +5,7 @@
 #include "game_tracking.hpp"
 #include "offer_pointing.hpp"
 #include "presentation_gate.hpp"
+#include "tutorial.hpp"
 #include "web_visual.hpp"
 
 namespace spidy {
@@ -29,6 +30,10 @@ struct NativeEyeFrame {
     body_calibration::View calibration{};
     // Slow motion: the image's recolouring and the focus meter (none at rest).
     SlowMotionView slow{};
+    // The wrist HUD: health and the heal button (wrist_hud.hpp).
+    wrist_hud::View wrist{};
+    // The tutorial's card (tutorial.hpp; stage off: none).
+    tutorial::View tutorial{};
     // The gadget wheel, open while X is held (gadget_wheel.hpp).
     GadgetWheelView gadgetWheel{};
     bool flatScreen{};

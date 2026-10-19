@@ -13,6 +13,8 @@
 #include "spidy/game_pad.hpp"
 #include "spidy/gadget_wheel.hpp"
 #include "spidy/controller_layout.hpp"
+#include "spidy/tutorial.hpp"
+#include "spidy/wrist_hud.hpp"
 #include "spidy/game_swing.hpp"
 #include "spidy/native_movement.hpp"
 #include "spidy/presentation_gate.hpp"
@@ -5603,7 +5605,7 @@ int main() {
         check(odd.handing(),"a frame length of no number ended it early");
         check(!hold(odd,WallHandover::window,true,true,false),"the walls never came back");
     });
-    test("controller layouts: Touch and Index as they were, the Steam Frame's buttons each their own", [] {
+    test("controller layouts: Touch as it was, Index with trackpad pause and heal, the Steam Frame's buttons each their own", [] {
         using Paths=std::vector<std::pair<ControllerInput,std::string>>;
         const auto of=[](ControllerKind kind) {
             for (const auto& layout : controllerLayouts())
@@ -5643,7 +5645,10 @@ int main() {
               !of(ControllerKind::touch).extension,"the Touch profile changed");
         auto index=hands("/input/squeeze/force");
         for (const auto& button : Paths{{a,"/user/hand/right/input/a/click"},{y,"/user/hand/left/input/b/click"},
-                                        {b,"/user/hand/right/input/b/click"},{x,"/user/hand/left/input/a/click"}})
+                                        {b,"/user/hand/right/input/b/click"},{x,"/user/hand/left/input/a/click"},
+                                        // The Index has no menu button and no D-pad: its trackpads pressed down.
+                                        {menu,"/user/hand/left/input/trackpad/force"},
+                                        {dpadDown,"/user/hand/right/input/trackpad/force"}})
             index.push_back(button);
         check(paths(of(ControllerKind::index))==index,"the Index layout changed");
         check(std::string(of(ControllerKind::index).profile)=="/interaction_profiles/valve/index_controller" &&
@@ -5688,11 +5693,119 @@ int main() {
             for (const auto& [input,path] : all) {
                 check(std::count_if(all.begin(),all.end(),[&](const auto& other) { return other.second==path; })==1,
                       "a control is bound twice");
-                check(!frameOnly(input) || layout.kind==ControllerKind::frame,"another controller got the Frame's own");
+                check(!frameOnly(input) || layout.kind==ControllerKind::frame || borrowedBy(layout.kind,input),
+                      "another controller got the Frame's own");
             }
         }
         check(frameOnly(view) && frameOnly(dpadRight) && !frameOnly(menu) && !frameOnly(aim),"which controls are the Frame's own");
         check(std::string(controllerName(ControllerKind::frame))=="Steam Frame","the Frame's name");
+    });
+    test("wrist HUD: the bar over the wrist ring, the heal button at its end, facing the viewer", [] {
+        using namespace wrist_hud;
+        const Pose hand{{0,1.2f,-.4f},{}};
+        const Vec3 viewer{0,1.6f,0};
+        const auto l=layout(hand,viewer);
+        check(l.valid,"a layout for a wrist in front of the eyes");
+        check(std::abs(length(l.ring-(hand.position+ringOffset)))<1e-5f,"the ring where the focus meter is");
+        check(dot(l.view,viewer-l.ring)>0 && std::abs(dot(l.right,l.view))<1e-4f && std::abs(dot(l.up,l.view))<1e-4f,
+              "the panel faces the viewer");
+        check(l.right.x>.9f,"right is the viewer's right");
+        check(dot(l.button-l.barEnd,l.right)>0 && dot(l.barEnd-l.barStart,l.right)>.05f,"the button right of the bar");
+        check(dot(l.barStart-l.ring,l.up)>.02f,"the bar above the ring");
+        check(!layout(hand,hand.position).valid,"no layout from inside the wrist");
+    });
+    test("wrist HUD: health as a share of the most seen, a trail after a hit, a new component starting over", [] {
+        wrist_hud::Health h;
+        h.update(.016f,false,0,0);
+        check(!h.known() && h.fraction()==1,"unknown: full and unknown");
+        h.update(.016f,true,200,7);
+        check(h.known() && h.fraction()==1,"the first reading is the most");
+        h.update(.016f,true,150,7);
+        check(std::abs(h.fraction()-.75f)<1e-4f && h.hurt()>.9f,"a hit: three quarters left, a flash");
+        check(h.trail()>.99f,"the trail holds where the bar was");
+        for (int i=0;i<200;++i)
+            h.update(.016f,true,150,7);
+        check(std::abs(h.trail()-.75f)<1e-3f && h.hurt()==0,"the trail drains down to the bar");
+        h.update(.016f,true,190,7);
+        check(h.healed()>.9f && std::abs(h.fraction()-.95f)<1e-4f,"a heal flashes");
+        h.update(.016f,true,50,8);
+        check(h.fraction()==1,"a new component (a load) starts over");
+    });
+    test("heal button: a fingertip presses it once a poke, held long enough for the game", [] {
+        using namespace wrist_hud;
+        const auto l=layout(Pose{{0,1.2f,-.4f},{}},{0,1.6f,0});
+        HealButton b;
+        check(!b.update(.016f,true,l.button+Vec3{0,0,.2f},l) && b.hover()==0,"far: nothing");
+        check(!b.update(.016f,true,l.button+l.view*.05f,l) && b.hover()>0,"near: hover");
+        check(b.update(.016f,true,l.button,l) && b.pressedNow(),"on it: pressed");
+        check(b.update(.016f,true,l.button+l.view*.2f,l),"held a moment though the finger left at once");
+        for (int i=0;i<30;++i)
+            b.update(.016f,true,l.button+l.view*.2f,l);
+        check(!b.held(),"let go after the hold");
+        b.update(.016f,true,l.button,l);
+        check(b.presses()==2,"a second poke presses again");
+        for (int i=0;i<40;++i)
+            b.update(.016f,true,l.button,l);
+        check(!b.held() || b.presses()==2,"resting on it does not press again");
+        check(!b.update(.016f,false,l.button,l),"not in play: never");
+    });
+    test("tutorial: offered, started by a poke, each card done by its move, ended for good", [] {
+        using namespace tutorial;
+        Tutorial t;
+        const Pose head{{0,1.6f,0},{}};
+        check(t.count()>=14,"every move has a card");
+        bool uppercut=false,slam=false,swing=false,zip=false;
+        for (const auto& s : steps({}))
+            uppercut|=s.goal==Goal::uppercut,slam|=s.goal==Goal::slam,swing|=s.goal==Goal::swing,zip|=s.goal==Goal::zip;
+        check(uppercut && slam && swing && zip,"swing, zip, uppercut and downslam are taught");
+        t.offer(head);
+        check(t.stage()==Stage::offer,"offered");
+        const auto pokeAt=[&](Choice want) {
+            const auto list=buttons(t.stage(),t.step(),t.count(),t.done());
+            for (const auto& b : list)
+                if (b.choice==want) {
+                    const auto card=t.card();
+                    const Vec3 at=card.position+card.orientation.rotate({(b.x0+b.x1)/2,(buttonLow+buttonHigh)/2,.01f});
+                    Fingers f;f.pointing={false,true};f.tips={Vec3{},at};
+                    Fingers away;away.pointing={false,true};away.tips={Vec3{},at+Vec3{0,0,.5f}};
+                    const auto c=t.update(.016f,true,head,f,{});
+                    t.update(.016f,true,head,away,{});
+                    return c;
+                }
+            return Choice::none;
+        };
+        // A finger resting on START while the card is not active presses nothing.
+        check(pokeAt(Choice::start)==Choice::start && t.stage()==Stage::step && t.step()==0,"START begins at the first card");
+        Events e;e.webAttached=true;
+        t.update(.016f,true,head,{},e);
+        check(!t.done(),"a web held is not yet a swing");
+        t.update(.016f,true,head,{},{});
+        check(t.done(),"let go: the swing is done");
+        for (int i=0;i<200 && t.step()==0;++i)
+            t.update(.016f,true,head,{},{});
+        check(t.step()==1 && !t.done(),"on to the next card by itself");
+        check(pokeAt(Choice::next)==Choice::next && t.step()==2,"SKIP moves on");
+        check(pokeAt(Choice::back)==Choice::back && t.step()==1,"BACK goes back");
+        t.update(.016f,false,head,{},Events{.webAttached=true,.reeling=true});
+        check(!t.done(),"paused: nothing counts");
+        check(pokeAt(Choice::end)==Choice::end && t.stage()==Stage::off,"END closes it");
+        Tutorial u(Wording{ControllerKind::index,false});
+        check(buttonName('X',ControllerKind::index)=="LEFT A" && buttonName('Y',ControllerKind::index)=="LEFT B",
+              "the Index names its own buttons");
+        bool trackpad=false;
+        for (const auto& s : steps({ControllerKind::index,false}))
+            for (const auto& line : s.lines)
+                trackpad|=line.find("TRACKPAD")!=std::string::npos;
+        check(trackpad,"the Index cards name the trackpads");
+        for (const auto& s : steps({ControllerKind::touch,true}))
+            for (const auto& line : s.lines)
+                for (char c : line)
+                    check(c==' ' || drawable(c),"every card prints in the stroke font");
+        std::vector<Vertex> drawn;
+        u.offer(head);
+        u.update(.5f,true,head,{},{});
+        appendView(drawn,u.view(),head.position);
+        check(drawn.size()>300,"the card draws");
     });
     test("B, X and Y stay what they were pressed as between the game screen and VR", [] {
         using namespace game_pad;
