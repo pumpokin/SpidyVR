@@ -469,7 +469,9 @@ void keepSettings(const vr_settings::Values& v) {
     const std::string text = "arm_sensitivity=" + std::to_string(v.armSensitivity) +
                              "\nswing_assist=" + std::to_string(v.swingAssist) +
                              "\nweb_align=" + std::to_string(v.webAlign) +
-                             "\nspider_sense=" + std::to_string(v.spiderSense) + "\n";
+                             "\nspider_sense=" + std::to_string(v.spiderSense) +
+                             "\nrecording_view=" + std::to_string(v.recordingView) +
+                             "\nrecording_fov=" + std::to_string(v.recordingFov) + "\n";
     DWORD written{};
     WriteFile(file, text.data(), static_cast<DWORD>(text.size()), &written, nullptr);
     CloseHandle(file);
@@ -848,12 +850,18 @@ DWORD WINAPI run(void*) {
             values.swingAssist = keptSetting(kept, "swing_assist", values.swingAssist);
             values.webAlign = keptSetting(kept, "web_align", values.webAlign);
             values.spiderSense = keptSetting(kept, "spider_sense", values.spiderSense);
+            values.recordingView = keptSetting(kept, "recording_view", values.recordingView);
+            values.recordingFov = keptSetting(kept, "recording_fov", values.recordingFov);
         }
         values = vr_settings::sanitized(values);
         // What settings.txt holds, so a change writes it once.
         int keptArm = values.armSensitivity, keptAssist = values.swingAssist, keptAlign = values.webAlign,
-            keptSense = values.spiderSense;
+            keptSense = values.spiderSense, keptView = values.recordingView, keptFov = values.recordingFov;
         spider_sense::SpiderSense spiderSense;
+        // The recording view's camera (mirror_camera.hpp), and when the image
+        // it last followed was shown (ns).
+        mirror_camera::Follow mirrorFollow;
+        int64_t mirrorShown{};
         std::vector<game_targets::Candidate> nearBots;
         std::vector<spider_sense::Threat> threats;
         // WEB ALIGN: the lean up the web (web_align.hpp).
@@ -1510,7 +1518,10 @@ DWORD WINAPI run(void*) {
                         ++settingChanges;
                         applySettings();
                         if (values.armSensitivity != keptArm || values.swingAssist != keptAssist ||
-                            values.webAlign != keptAlign || values.spiderSense != keptSense) {
+                            values.webAlign != keptAlign || values.spiderSense != keptSense ||
+                            values.recordingView != keptView || values.recordingFov != keptFov) {
+                            keptView = values.recordingView;
+                            keptFov = values.recordingFov;
                             keptArm = values.armSensitivity;
                             keptAssist = values.swingAssist;
                             keptAlign = values.webAlign;
@@ -3381,7 +3392,27 @@ DWORD WINAPI run(void*) {
                                         .count();
                         // The game's window mirrors the left eye as it is now, the
                         // drawings above on it; copied only when the window took the last.
-                        native_gpu::keepShownEye(targets[0].texture);
+                        {
+                            // Through the recording view's camera: it follows the
+                            // eye the image was drawn for, smoothly.
+                            const auto& o = targets[0].view.pose.orientation;
+                            const auto& lens = targets[0].view.fov;
+                            const Quat eye{o.x, o.y, o.z, o.w};
+                            const float seconds =
+                                mirrorShown && shown > mirrorShown
+                                    ? static_cast<float>(static_cast<double>(shown - mirrorShown) * 1e-9)
+                                    : 0.f;
+                            mirrorShown = shown;
+                            native_gpu::MirrorView mirrorView;
+                            mirrorView.mode = values.recordingView;
+                            mirrorView.relative =
+                                eye.conjugate() * mirrorFollow.update(seconds, eye, values.recordingView);
+                            mirrorView.tangents = {std::tan(lens.angleLeft), std::tan(lens.angleRight),
+                                                   std::tan(lens.angleUp), std::tan(lens.angleDown)};
+                            mirrorView.halfWidth =
+                                std::tan(static_cast<float>(values.recordingFov) * 3.14159265f / 360);
+                            native_gpu::keepShownEye(targets[0].texture, &mirrorView);
+                        }
                         if (webGap >= 0 && imageGeneration != gapGeneration) {
                             native_eyes::reportWebGap(webGap);
                             gapGeneration = imageGeneration;

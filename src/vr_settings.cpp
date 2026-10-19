@@ -29,6 +29,9 @@ constexpr const char* armChoices[] = {"50%", "75%", "100%", "125%", "150%", "200
 constexpr const char* assistChoices[] = {"OFF", "LOW", "MEDIUM", "HIGH"};
 constexpr const char* alignChoices[] = {"OFF", "BODY", "BODY + VIEW"};
 constexpr const char* senseChoices[] = {"OFF", "VISUAL", "VIBRATION", "BOTH"};
+constexpr const char* recordingViewChoices[] = {"RAW EYE", "SMOOTH", "STEADY"};
+constexpr const char* recordingFovChoices[] = {"60\xC2\xB0", "70\xC2\xB0", "80\xC2\xB0",
+                                               "90\xC2\xB0", "100\xC2\xB0", "110\xC2\xB0"};
 constexpr int screenSizes[] = {0, 1, 2};
 constexpr int hudSizes[] = {0, 1, 2, 3};
 constexpr int depthSteps[] = {0, 1, 2, 3};
@@ -40,7 +43,9 @@ static_assert(std::size(swingChoices) == std::size(swingSpeeds) && std::size(sna
               std::size(depthChoices) == std::size(depthSteps) && std::size(depthSteps) == std::size(screenDepths) &&
               std::size(armChoices) == std::size(armSensitivities) &&
               std::size(assistChoices) == std::size(swingAssists) && std::size(alignChoices) == std::size(webAligns) &&
-              std::size(senseChoices) == std::size(spiderSenses));
+              std::size(senseChoices) == std::size(spiderSenses) &&
+              std::size(recordingViewChoices) == std::size(recordingViews) &&
+              std::size(recordingFovChoices) == std::size(recordingFovs));
 // A list setting's steps, or none for a switch.
 std::span<const int> steps(Item item) {
     switch (item) {
@@ -70,6 +75,10 @@ std::span<const int> steps(Item item) {
         return webAligns;
     case Item::spiderSense:
         return spiderSenses;
+    case Item::recordingView:
+        return recordingViews;
+    case Item::recordingFov:
+        return recordingFovs;
     default:
         return {};
     }
@@ -102,6 +111,10 @@ float numberOf(Item item, const Values& v) {
         return static_cast<float>(v.webAlign);
     case Item::spiderSense:
         return static_cast<float>(v.spiderSense);
+    case Item::recordingView:
+        return static_cast<float>(v.recordingView);
+    case Item::recordingFov:
+        return static_cast<float>(v.recordingFov);
     default:
         return 0;
     }
@@ -143,11 +156,13 @@ Values sanitized(Values v) {
     v.swingAssist = std::clamp(v.swingAssist, 0, 3);
     v.webAlign = std::clamp(v.webAlign, 0, 2);
     v.spiderSense = std::clamp(v.spiderSense, 0, 3);
+    v.recordingView = std::clamp(v.recordingView, 0, 2);
+    v.recordingFov = std::clamp(v.recordingFov, 40, 120);
     return v;
 }
-const std::array<Row, 25>& rows() {
+const std::array<Row, 28>& rows() {
     // The help fits the game's description column beside the rows.
-    static const std::array<Row, 25> all{{
+    static const std::array<Row, 28> all{{
         {Item::none, "WEBS", nullptr, {}},
         {Item::webButton, "WEB BUTTON",
          "Which button shoots and holds a web; the other reels in and shoots web balls.", webButtonChoices},
@@ -190,6 +205,11 @@ const std::array<Row, 25>& rows() {
         {Item::none, "COMBAT", nullptr, {}},
         {Item::spiderSense, "SPIDER-SENSE",
          "Before an enemy strikes: lines flash on his side, the controllers buzz.", senseChoices},
+        {Item::none, "RECORDING", nullptr, {}},
+        {Item::recordingView, "RECORDING VIEW",
+         "What your monitor shows in VR. SMOOTH and STEADY calm head shake.", recordingViewChoices},
+        {Item::recordingFov, "RECORDING FOV", "How wide your monitor's view is. Your headset view stays the same.",
+         recordingFovChoices},
     }};
     return all;
 }
@@ -257,6 +277,12 @@ bool choose(Item item, int index, Values& v) {
         break;
     case Item::spiderSense:
         v.spiderSense = s[index];
+        break;
+    case Item::recordingView:
+        v.recordingView = s[index];
+        break;
+    case Item::recordingFov:
+        v.recordingFov = s[index];
         break;
     default:
         return false;

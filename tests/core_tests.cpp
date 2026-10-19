@@ -14,6 +14,7 @@
 #include "spidy/gadget_wheel.hpp"
 #include "spidy/controller_layout.hpp"
 #include "spidy/tutorial.hpp"
+#include "spidy/mirror_camera.hpp"
 #include "spidy/spider_sense.hpp"
 #include "spidy/web_align.hpp"
 #include "spidy/wrist_hud.hpp"
@@ -2719,6 +2720,46 @@ int main() {
         behind.update(.011f,{{10,{-.5f,1.2f,4},false}},head);
         const auto back=behind.view(head);
         check(back.strength==1 && dot(back.centre-head.position,Vec3{0,0,-1})>0,"shown ahead, where it can be seen");
+    });
+    test("recording view: raw is the middle as before; smooth trails the head and stays in the image", [] {
+        using namespace mirror_camera;
+        // An Index-like lens: about 105 degrees across, a little wider inward.
+        const Tangents lens{-1.39f,1.25f,1.33f,-1.40f};
+        const auto middle=rawPart(1.f,16.f/9);
+        near(middle.centre[0],.5f);near(middle.axisX[0],.5f);near(middle.axisY[1],.5f*9/16);
+        // Looking where the eye looks: centred on straight ahead, 90 degrees across.
+        Part p;
+        check(part({},lens,1,16.f/9,p),"a part straight ahead");
+        float u{},v{};
+        project({0,0,-1},lens,u,v);
+        near(p.centre[0],u);near(p.centre[1],v);
+        near(p.axisX[0],1/(lens.right-lens.left));
+        // Asked wider than the image: held inside it.
+        check(part({},lens,5,16.f/9,p) && p.centre[0]-p.axisX[0]>=-1e-4f && p.centre[0]+p.axisX[0]<=1+1e-4f,
+              "a view too wide is held inside the image");
+        // A camera turned 10 degrees left of the eye samples left of centre.
+        check(part(Quat::yaw(.1745f),lens,1,16.f/9,p) && p.centre[0]<u-.03f,"turned left, it samples left");
+        // The camera follows a head that jerks 20 degrees: not at once, but soon.
+        Follow f;
+        const Quat a{},b=Quat::yaw(.35f);
+        f.update(.011f,a,smooth);
+        const Quat moved=f.update(.011f,b,smooth);
+        check(Follow::angle(moved,b)>.25f,"one frame later it has not jumped with the head");
+        Quat later{};
+        for (int i=0;i<60;++i)
+            later=f.update(.011f,b,smooth);
+        check(Follow::angle(later,b)<.01f,"in well under a second it is there");
+        // It never lags further than the image allows.
+        Follow g;
+        g.update(.011f,a,smooth);
+        check(Follow::angle(g.update(.011f,Quat::yaw(1.2f),smooth),Quat::yaw(1.2f))<=g.smoothLag+1e-3f,
+              "a fast turn drags it along");
+        // STEADY holds the horizon level: a rolled head, an upright camera.
+        Follow h;
+        const Quat rolled=Quat::around({0,0,1},.4f);
+        const Quat level=h.update(.011f,rolled,steady);
+        check(std::abs(level.rotate({1,0,0}).y)<1e-3f,"no roll");
+        check(Follow::angle(Follow{}.update(.011f,b,raw),b)<1e-5f,"RAW is the head");
     });
     test("virtual travel cannot trigger yank", [] {
         TestWorld w;
@@ -8852,12 +8893,12 @@ int main() {
             for (const char* c : row.choices)
                 check(c && *c, "an empty choice");
         }
-        check(headings == 6 && all[0].item == Item::none && all[6].item == Item::none && all[8].item == Item::none &&
+        check(headings == 7 && all[0].item == Item::none && all[6].item == Item::none && all[8].item == Item::none &&
                   all[16].item == Item::none,
               "the sections: webs, body, comfort, experimental");
         check(all[17].item == Item::flips && all[17].choices.empty() && std::strcmp(all[16].title, "EXPERIMENTAL") == 0,
               "the flips: a switch under EXPERIMENTAL");
-        check(all.size() == 25 && all[18].item == Item::flipSpeed && all[18].choices.size() == std::size(flipSpeeds),
+        check(all.size() == 28 && all[18].item == Item::flipSpeed && all[18].choices.size() == std::size(flipSpeeds),
               "the flip speed under the flips");
         check(all[19].item == Item::none && std::strcmp(all[19].title, "SWING FEEL") == 0 &&
                   all[20].item == Item::armSensitivity && all[20].choices.size() == std::size(armSensitivities) &&
@@ -8867,7 +8908,12 @@ int main() {
               "arm sensitivity, swing assist and web align under SWING FEEL");
         check(all[23].item == Item::none && std::strcmp(all[23].title, "COMBAT") == 0 &&
                   all[24].item == Item::spiderSense && all[24].choices.size() == 4 && Values{}.spiderSense == 3,
-              "SPIDER-SENSE under COMBAT, the last row, on (both) by default");
+              "SPIDER-SENSE under COMBAT, on (both) by default");
+        check(all[25].item == Item::none && std::strcmp(all[25].title, "RECORDING") == 0 &&
+                  all[26].item == Item::recordingView && all[27].item == Item::recordingFov &&
+                  Values{}.recordingView == 1 && Values{}.recordingFov == 90 &&
+                  choice(Item::recordingFov, Values{}) == 3,
+              "RECORDING VIEW and RECORDING FOV under RECORDING, the last rows: smooth, 90 degrees");
         {
             Values v;
             check(v.swingAssist == 0 && v.webAlign == 0 && choose(Item::swingAssist, 3, v) && v.swingAssist == 3 &&
