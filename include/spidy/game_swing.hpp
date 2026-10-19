@@ -201,7 +201,7 @@ static_assert(sizeof(Config) == 64 && sizeof(Hand) == 52 && sizeof(Command) == 2
 // 12. Version 4 (settingsBytesV4) ends before it and leaves the webs as they
 // are.
 struct Settings {
-    uint32_t magic = 0x53575354, version = 6, bytes = sizeof(Settings), grab = 1;
+    uint32_t magic = 0x53575354, version = 7, bytes = sizeof(Settings), grab = 1;
     float maxSpeed = 32;
     uint32_t airWebs = 1;
     float gravity = 6;
@@ -209,10 +209,13 @@ struct Settings {
     uint32_t physical = 1;
     // Version 6: ARM SENSITIVITY as a factor (SwingConfig::armSensitivity).
     float armSensitivity = 1;
+    // Version 7: SWING ASSIST's rate, per second (SwingConfig::swingAssist).
+    float swingAssist = 0;
 };
-constexpr uint32_t settingsBytesV3 = 28, settingsBytesV4 = 32, settingsBytesV5 = 36;
-static_assert(sizeof(Settings) == 40 && offsetof(Settings, walls) == settingsBytesV3 &&
-              offsetof(Settings, physical) == settingsBytesV4 && offsetof(Settings, armSensitivity) == settingsBytesV5);
+constexpr uint32_t settingsBytesV3 = 28, settingsBytesV4 = 32, settingsBytesV5 = 36, settingsBytesV6 = 40;
+static_assert(sizeof(Settings) == 44 && offsetof(Settings, walls) == settingsBytesV3 &&
+              offsetof(Settings, physical) == settingsBytesV4 && offsetof(Settings, armSensitivity) == settingsBytesV5 &&
+              offsetof(Settings, swingAssist) == settingsBytesV6);
 // Physical webs (SpidyRopeData): what the ropes did, for the session report.
 struct Ropes {
     uint32_t magic = 0x53575250, version = 2, bytes = sizeof(Ropes), physical{};

@@ -36,6 +36,7 @@
 #include "spidy/vr_settings.hpp"
 #include "spidy/web_pull.hpp"
 #include "spidy/tutorial.hpp"
+#include "spidy/web_align.hpp"
 #include "spidy/wrist_hud.hpp"
 #include "spidy/xr_layers.hpp"
 #include "spidy/xr_session.hpp"
@@ -422,37 +423,50 @@ std::wstring tutorialPath() {
     CreateDirectoryW(path.c_str(), nullptr);
     return path + L"\\tutorial.txt";
 }
-// ARM SENSITIVITY, kept between sessions beside the tutorial's answer
-// (%LOCALAPPDATA%\Spidy\arm_sensitivity.txt, a percent): the launcher does not
-// carry it. 0: none kept.
-std::wstring armPath() {
+// The settings this build adds (ARM SENSITIVITY, SWING ASSIST, WEB ALIGN),
+// kept between sessions beside the tutorial's answer: the launcher does not
+// carry them. %LOCALAPPDATA%\Spidy\settings.txt, a line "name=number" each.
+std::wstring settingsPath() {
     const auto tutorial = tutorialPath();
     if (tutorial.empty())
         return {};
-    return tutorial.substr(0, tutorial.find_last_of(L'\\') + 1) + L"arm_sensitivity.txt";
+    return tutorial.substr(0, tutorial.find_last_of(L'\\') + 1) + L"settings.txt";
 }
-int keptArmSensitivity() {
-    const auto path = armPath();
+std::string readSettings() {
+    const auto path = settingsPath();
     if (path.empty())
-        return 0;
+        return {};
     const HANDLE file = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
                                     FILE_ATTRIBUTE_NORMAL, nullptr);
     if (file == INVALID_HANDLE_VALUE)
-        return 0;
-    char text[16]{};
+        return {};
+    char text[1024]{};
     DWORD got{};
     ReadFile(file, text, sizeof(text) - 1, &got, nullptr);
     CloseHandle(file);
-    return std::atoi(text);
+    return text;
 }
-void keepArmSensitivity(int percent) {
-    const auto path = armPath();
+// The number kept for `name`, or `fallback`.
+int keptSetting(const std::string& text, const char* name, int fallback) {
+    const std::string key = std::string(name) + "=";
+    for (size_t at = 0; at < text.size();) {
+        const size_t end = std::min(text.find('\n', at), text.size());
+        if (text.compare(at, key.size(), key) == 0)
+            return std::atoi(text.c_str() + at + key.size());
+        at = end + 1;
+    }
+    return fallback;
+}
+void keepSettings(const vr_settings::Values& v) {
+    const auto path = settingsPath();
     if (path.empty())
         return;
     const HANDLE file = CreateFileW(path.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (file == INVALID_HANDLE_VALUE)
         return;
-    const auto text = std::to_string(percent);
+    const std::string text = "arm_sensitivity=" + std::to_string(v.armSensitivity) +
+                             "\nswing_assist=" + std::to_string(v.swingAssist) +
+                             "\nweb_align=" + std::to_string(v.webAlign) + "\n";
     DWORD written{};
     WriteFile(file, text.data(), static_cast<DWORD>(text.size()), &written, nullptr);
     CloseHandle(file);
@@ -822,10 +836,17 @@ DWORD WINAPI run(void*) {
         values.hud = static_cast<int>(config.hud);
         values.flipSpeed = static_cast<int>(config.flipSpeed);
         values.screenDepth = static_cast<int>(config.screenDepth);
-        if (const int arm = keptArmSensitivity(); arm > 0)
-            values.armSensitivity = arm;
+        {
+            const auto kept = readSettings();
+            values.armSensitivity = keptSetting(kept, "arm_sensitivity", values.armSensitivity);
+            values.swingAssist = keptSetting(kept, "swing_assist", values.swingAssist);
+            values.webAlign = keptSetting(kept, "web_align", values.webAlign);
+        }
         values = vr_settings::sanitized(values);
-        int keptArm = values.armSensitivity;
+        // What settings.txt holds, so a change writes it once.
+        int keptArm = values.armSensitivity, keptAssist = values.swingAssist, keptAlign = values.webAlign;
+        // WEB ALIGN: the lean up the web (web_align.hpp).
+        web_align::WebAlign webAlign;
         game_menu::publish(values);
         uint32_t settingChanges{};
         // aims are each hand's latest preview.
@@ -1079,6 +1100,7 @@ DWORD WINAPI run(void*) {
                 s.airWebs = values.airWebs;
                 s.gravity = vr_settings::gravity(values.weight);
                 s.armSensitivity = vr_settings::armFactor(values.armSensitivity);
+                s.swingAssist = vr_settings::assistRate(values.swingAssist);
                 s.walls = !(config.options & 16384);
                 sentSwingSettings = s;
                 swingSettingsSent = true;
@@ -1381,6 +1403,17 @@ DWORD WINAPI run(void*) {
                     rig.headroom(over);
                     if (headroomSeen > 0 && (headroomLeast == 0 || headroomSeen < headroomLeast))
                         headroomLeast = headroomSeen;
+                    // WEB ALIGN: from the webs the swing held last frame. In the
+                    // air only, off the swing's walls and the game's crawl.
+                    {
+                        const bool inAir = swingState.status && !swingState.grounded && !swingState.wall;
+                        const bool view = values.webAlign == web_align::bodyAndView;
+                        webAlign.update(frame.seconds, inAir && values.webAlign != web_align::off,
+                                        {swingState.webs[0].attached != 0, swingState.webs[1].attached != 0},
+                                        {swingState.webs[0].anchor, swingState.webs[1].anchor}, swingState.position,
+                                        view);
+                        rig.webAlign(view ? webAlign.tilt() : Quat{});
+                    }
                     motion = rig.update(controller, feet, {camera[8], camera[9], camera[10]}, gameplay,
                                         swingState.owned ? Vec3{0, 1, 0} : heroUp,
                                         game_swing::airborne(swingState, now.QuadPart, frequency.QuadPart), hold,
@@ -1465,9 +1498,12 @@ DWORD WINAPI run(void*) {
                     if (game_menu::take(values)) {
                         ++settingChanges;
                         applySettings();
-                        if (values.armSensitivity != keptArm) {
+                        if (values.armSensitivity != keptArm || values.swingAssist != keptAssist ||
+                            values.webAlign != keptAlign) {
                             keptArm = values.armSensitivity;
-                            keepArmSensitivity(keptArm);
+                            keptAssist = values.swingAssist;
+                            keptAlign = values.webAlign;
+                            keepSettings(values);
                         }
                     }
                     game_menu::publish(values);
@@ -2795,6 +2831,14 @@ DWORD WINAPI run(void*) {
                             tilt.x != 0 || tilt.y != 0 || tilt.z != 0) {
                             const Quat yaw = Quat::yaw(motion.swing.trackingYaw);
                             pose.tilt = yaw * tilt * yaw.conjugate();
+                        }
+                        // WEB ALIGN: BODY leans the body up the web about the eyes,
+                        // the view upright (BODY + VIEW leans the view, which the
+                        // tilt above already carries).
+                        if (values.webAlign == web_align::body && !motion.standing) {
+                            const Quat lean = webAlign.tilt();
+                            if (lean.x != 0 || lean.y != 0 || lean.z != 0)
+                                pose.tilt = lean * pose.tilt;
                         }
                         native_body::submit(pose);
                     }

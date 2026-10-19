@@ -75,6 +75,58 @@ Swing::Swing(SwingConfig c) : config_(c) {
         throw std::invalid_argument("Invalid ground clearance");
     if (!std::isfinite(c.armSensitivity) || c.armSensitivity <= 0 || c.armSensitivity > 10)
         throw std::invalid_argument("Invalid arm sensitivity");
+    if (!std::isfinite(c.swingAssist) || c.swingAssist < 0 || c.swingAssist > 20 || !(c.assistTurn >= 0) ||
+        !(c.assistSpeed >= 0) || !(c.zipSettle >= 0))
+        throw std::invalid_argument("Invalid swing assist");
+}
+void Swing::setSwingAssist(float rate) {
+    if (!std::isfinite(rate) || rate < 0 || rate > 20)
+        throw std::invalid_argument("Invalid swing assist");
+    config_.swingAssist = rate;
+}
+void Swing::assist(float dt, const Input& in, bool bearing) {
+    // The heading lasts the flight: from web to web, until the ground or a wall.
+    if (body_.grounded || wall_.on) {
+        assisting_ = false;
+        return;
+    }
+    if (!(config_.swingAssist > 0) || !bearing || sinceZip_ < config_.zipSettle)
+        return;
+    const Vec3 level{body_.velocity.x, 0, body_.velocity.z};
+    const float speed = length(level);
+    const Vec3 look = finite(in.look) ? Vec3{in.look.x, 0, in.look.z} : Vec3{};
+    const bool looking = length(look) > .3f;
+    if (!assisting_) {
+        if (speed >= config_.assistSpeed)
+            assistHeading_ = level / speed;
+        else if (looking)
+            assistHeading_ = normalized(look);
+        else
+            return;
+        assisting_ = true;
+    } else if (looking) {
+        // Toward where the head looks, no faster than assistTurn; a look
+        // behind (past 120 degrees) turns nothing.
+        const Vec3 want = normalized(look);
+        const float cosine = std::clamp(dot(assistHeading_, want), -1.f, 1.f);
+        const float angle = std::acos(cosine);
+        if (angle > 1e-4f && cosine > -.5f) {
+            const float turn = std::min(angle, config_.assistTurn * dt);
+            const float side = assistHeading_.x * want.z - assistHeading_.z * want.x > 0 ? -1.f : 1.f;
+            assistHeading_ = normalized(Quat::yaw(side * turn).rotate(assistHeading_));
+        }
+    }
+    if (speed < 1e-3f)
+        return;
+    const float along = dot(level, assistHeading_);
+    const Vec3 lateral = level - assistHeading_ * along;
+    const Vec3 kept = lateral * std::exp(-config_.swingAssist * dt);
+    // The level speed stays what it was: what leaves the side goes ahead (or
+    // back, for a body going backward along the heading).
+    const float rest = std::sqrt(std::max(0.f, speed * speed - dot(kept, kept)));
+    const Vec3 turned = assistHeading_ * (along < 0 ? -rest : rest) + kept;
+    body_.velocity.x = turned.x;
+    body_.velocity.z = turned.z;
 }
 void Swing::setArmSensitivity(float sensitivity) {
     if (!std::isfinite(sensitivity) || sensitivity <= 0 || sensitivity > 10)
@@ -1061,6 +1113,8 @@ void Swing::step(float dt, const Input& in, const WorldQueries& world, const Wor
             pull[i] += change;
             body_.velocity -= radial * change;
         }
+    // Swing assist, once the ropes have had their say.
+    assist(dt, in, bearing[0] || bearing[1]);
     // A web may pull along a wall or off it, never through it.
     if (wall_.on)
         holdWall(dt, wallBefore, collision);

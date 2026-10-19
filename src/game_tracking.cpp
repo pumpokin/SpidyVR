@@ -280,6 +280,7 @@ GameMotionFrame GameTrackingRig::update(const XrFrame& f, Vec3 feet, Vec3 gameFo
         if (!brief) {
             flip_.reset();
             rig_.tilt = {};
+            aligned_ = false;
             surfaceTurn_ = {};
             surfaceShift_ = {};
             standing_ = false;
@@ -307,6 +308,7 @@ GameMotionFrame GameTrackingRig::update(const XrFrame& f, Vec3 feet, Vec3 gameFo
             // A recenter ends a flip: level, the head kept where it was.
             flip_.reset();
             rig_.tilt = {};
+            aligned_ = false;
             surfaceTurn_ = {};
             surfaceShift_ = {};
             rig_.preserveHead(lastHead_, f.head);
@@ -353,13 +355,26 @@ GameMotionFrame GameTrackingRig::update(const XrFrame& f, Vec3 feet, Vec3 gameFo
     }
     flip.head = f.head.orientation;
     flip.seconds = f.seconds;
-    if (flip_.level())
+    if (flip_.level() && !aligned_)
         rig_.pivot = f.head.position;
     if (flips_) {
         rig_.tilt = flip_.update(flip);
     } else {
         flip_.reset();
         rig_.tilt = {};
+    }
+    // Web align with the view: the tracking space leans with the web about
+    // the head where the lean began, as a flip turns it, while no flip does
+    // and nothing holds the player on a surface.
+    {
+        const bool leans = align_.x != 0 || align_.y != 0 || align_.z != 0;
+        if (leans && flip_.level() && !holds && !onSurface) {
+            const Quat yaw = Quat::yaw(rig_.yaw);
+            rig_.tilt = unit(yaw.conjugate() * align_ * yaw);
+            aligned_ = true;
+        } else {
+            aligned_ = false;
+        }
     }
     // Standing on the surface: the tracking space turns onto it about the
     // eyes, each frame the short way from where its up is, so a corner's

@@ -162,6 +162,16 @@ struct SwingConfig {
     // counts this times as far and as fast toward a zip (yankDistance and
     // yankSpeed), its impulse too. 1: as the arm moved.
     float armSensitivity = 1;
+    // Swing assist (the VR settings' SWING ASSIST): while a web holds the body
+    // in the air, the sideways part of its level speed turns into speed along
+    // its heading, 1 - e^(-swingAssist * t) of it over t seconds, the level
+    // speed kept; so a web off to one side swings the body on ahead instead of
+    // into the building it holds on. The heading is the way the body went when
+    // the first web took it (where the head looked, slower than assistSpeed),
+    // and turns toward where the head looks at up to assistTurn radians a
+    // second. Not for zipSettle seconds after a zip, which flies where it was
+    // pulled. 0: none.
+    float swingAssist = 0, assistTurn = 1.5f, assistSpeed = 2, zipSettle = .4f;
 };
 // The edges one web bends round at most (SwingConfig::physical).
 constexpr int maxBends = 6;
@@ -297,6 +307,12 @@ class Swing {
     void setGravity(float gravity);
     // SwingConfig::armSensitivity, from the next step (above 0, 10 at most).
     void setArmSensitivity(float sensitivity);
+    // SwingConfig::swingAssist, from the next step (0 off, 20 at most).
+    void setSwingAssist(float rate);
+    // The way swing assist keeps the body going (level, unit; zero: none now).
+    Vec3 assistHeading() const {
+        return assisting_ ? assistHeading_ : Vec3{};
+    }
     // Whether a clear shot attaches in the air at maximum reach from now on
     // (the VR settings); off, it misses. Webs already attached
     // keep their anchors.
@@ -518,6 +534,11 @@ class Swing {
     // Mounts allowed (allowMounts); the game holds the body on a wall of its
     // own (gameHoldsWall).
     bool mounts_ = true, gameHolds_{};
+    // Swing assist (SwingConfig::swingAssist): one step of it, and the
+    // heading it keeps while the body is in the air.
+    void assist(float dt, const Input&, bool bearing);
+    Vec3 assistHeading_{};
+    bool assisting_{};
     Vec3 support_{};
     // The game's crawl's surface as it last held the body there (a point of
     // its face, its normal), and how long its back is still refused.

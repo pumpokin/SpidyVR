@@ -14,6 +14,7 @@
 #include "spidy/gadget_wheel.hpp"
 #include "spidy/controller_layout.hpp"
 #include "spidy/tutorial.hpp"
+#include "spidy/web_align.hpp"
 #include "spidy/wrist_hud.hpp"
 #include "spidy/game_swing.hpp"
 #include "spidy/native_movement.hpp"
@@ -2619,6 +2620,78 @@ int main() {
         try { s.setArmSensitivity(0); } catch (const std::invalid_argument&) { refused=true; }
         check(refused,"no arm sensitivity of 0");
         s.setArmSensitivity(2);
+    });
+    test("swing assist: a web off to the side swings the body on ahead, its speed kept", [] {
+        // Flying ahead (-z) at 15 m/s, a web shot up to the right: without the
+        // assist the rope swings the body round toward the anchor's side.
+        const auto drift=[](float assist,Vec3& velocity) {
+            TestWorld w;
+            w.anchor={10,20,-6};
+            SwingConfig config;
+            config.swingAssist=assist;
+            Swing s(config);
+            s.reset({{0,5,0},{0,0,-15},false});
+            auto in=aimedAt({0,5,0},w.anchor);
+            in.look={0,0,-1};
+            for (int i=0;i<90;++i)
+                s.update(1.f/90,in,w);
+            check(s.webs()[0].attached,"the web holds");
+            velocity=s.body().velocity;
+            return s.body().position.x;
+        };
+        Vec3 plain{},assisted{};
+        const float free=drift(0,plain),kept=drift(6,assisted);
+        check(free>1,"without the assist the web pulls the body toward its side");
+        check(kept<free*.5f,"the assist keeps it going straighter");
+        check(-assisted.z>std::abs(assisted.x)*2,"the assisted body heads on ahead");
+        Swing s;
+        bool refused=false;
+        try { s.setSwingAssist(-1); } catch (const std::invalid_argument&) { refused=true; }
+        check(refused && length(s.assistHeading())==0,"no negative assist, no heading before a swing");
+    });
+    test("web align: the body leans up the web, back upright without it", [] {
+        using namespace web_align;
+        WebAlign a;
+        const std::array<bool,2> one{true,false};
+        // A web up and ahead (-z) of the body, 45 degrees from straight up.
+        const std::array<Vec3,2> anchors{Vec3{0,10,-10},Vec3{}};
+        for (int i=0;i<200;++i)
+            a.update(.01f,true,one,anchors,{0,0,0},false);
+        const Vec3 up=a.tilt().rotate({0,1,0});
+        check(std::abs(a.angle()-.7854f)<.02f,"leans the whole 45 degrees");
+        check(up.z<-.6f && up.y>.6f,"its up points along the web");
+        for (int i=0;i<200;++i)
+            a.update(.01f,true,one,anchors,{0,0,0},true);
+        check(a.angle()<=a.maxView+.01f,"the view leans no more than maxView");
+        for (int i=0;i<300;++i)
+            a.update(.01f,false,one,anchors,{0,0,0},false);
+        const Quat q=a.tilt();
+        check(q.x==0 && q.y==0 && q.z==0,"let go: upright, exactly");
+        // A web shot level or down leans nothing.
+        WebAlign b;
+        for (int i=0;i<100;++i)
+            b.update(.01f,true,one,{Vec3{0,.2f,-10},Vec3{}},{0,0,0},false);
+        check(b.angle()<1e-3f,"no lean toward a web below the body");
+    });
+    test("web align with the view: the rig leans about the head, which stays put", [] {
+        GameTrackingRig rig;
+        auto f=trackedFrame();
+        f.seconds=1.f/90;
+        const auto first=rig.update(f,{0,0,0},{0,0,-1},true);
+        const Quat lean=Quat::around({1,0,0},.5f);
+        rig.webAlign(lean);
+        GameMotionFrame m{};
+        for (int i=0;i<5;++i) {
+            ++f.predictedDisplayTime;
+            m=rig.update(f,{0,0,0},{0,0,-1},true);
+        }
+        check(length(m.headPose.position-first.headPose.position)<1e-3f,"the head stays where it was");
+        const Vec3 up=m.headPose.orientation.rotate({0,1,0});
+        check(std::abs(std::acos(std::clamp(up.y,-1.f,1.f))-.5f)<.02f,"the view leans by the web's tilt");
+        rig.webAlign({});
+        ++f.predictedDisplayTime;
+        m=rig.update(f,{0,0,0},{0,0,-1},true);
+        check(m.headPose.orientation.rotate({0,1,0}).y>.999f,"upright again without it");
     });
     test("virtual travel cannot trigger yank", [] {
         TestWorld w;
@@ -8757,11 +8830,22 @@ int main() {
               "the sections: webs, body, comfort, experimental");
         check(all[17].item == Item::flips && all[17].choices.empty() && std::strcmp(all[16].title, "EXPERIMENTAL") == 0,
               "the flips: a switch under EXPERIMENTAL");
-        check(all.size() == 21 && all[18].item == Item::flipSpeed && all[18].choices.size() == std::size(flipSpeeds),
+        check(all.size() == 23 && all[18].item == Item::flipSpeed && all[18].choices.size() == std::size(flipSpeeds),
               "the flip speed under the flips");
-        check(all[19].item == Item::none && std::strcmp(all[19].title, "ARMS") == 0 &&
-                  all[20].item == Item::armSensitivity && all[20].choices.size() == std::size(armSensitivities),
-              "arm sensitivity under ARMS, the last row");
+        check(all[19].item == Item::none && std::strcmp(all[19].title, "SWING FEEL") == 0 &&
+                  all[20].item == Item::armSensitivity && all[20].choices.size() == std::size(armSensitivities) &&
+                  all[21].item == Item::swingAssist && all[21].choices.size() == 4 &&
+                  all[22].item == Item::webAlign && all[22].choices.size() == 3 &&
+                  std::strcmp(all[22].choices[2], "BODY + VIEW") == 0,
+              "arm sensitivity, swing assist and web align under SWING FEEL, the last rows");
+        {
+            Values v;
+            check(v.swingAssist == 0 && v.webAlign == 0 && choose(Item::swingAssist, 3, v) && v.swingAssist == 3 &&
+                      assistRate(v.swingAssist) == 6.f && assistRate(0) == 0 && choose(Item::webAlign, 2, v) &&
+                      v.webAlign == 2 && !choose(Item::webAlign, 3, v) &&
+                      sanitized(Values{.swingAssist = 9, .webAlign = -1}).swingAssist == 3,
+                  "SWING ASSIST and WEB ALIGN: off by default, OFF to HIGH and OFF to BODY + VIEW");
+        }
         {
             Values v;
             check(v.armSensitivity == 100 && choice(Item::armSensitivity, v) == 2 &&
