@@ -1098,7 +1098,8 @@ inline State fromControllers(const XrFrame& frame, Mapping mapping, const Walk& 
     if (frame.buttons & buttonMenu)
         s.buttons |= start;
     // The Steam Frame's View button and D-pad are the game's own wherever
-    // they are pressed; no other controller sets them.
+    // they are pressed; of the others only the Index sets one, D-pad down
+    // (heal) from its right trackpad pressed down.
     const std::pair<ControllerButton, Button> own[] = {{buttonView, back},
                                                        {buttonDpadUp, dpadUp},
                                                        {buttonDpadDown, dpadDown},

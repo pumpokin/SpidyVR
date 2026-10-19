@@ -1,4 +1,5 @@
 #pragma once
+#include "wrist_hud.hpp"
 #include "slow_motion.hpp"
 #include "spider_sense.hpp"
 #include "vertex.hpp"
@@ -245,6 +246,14 @@ Vec3 onAimLine(Vec3 point, Vec3 normal, Vec3 origin, Vec3 direction);
 // pulse. pixelAngle as for appendWeb.
 void appendSlowMotionMeter(std::vector<Vertex>& out, const SlowMotionView& view, Pose hand, Vec3 viewer,
                            float pixelAngle, float seconds);
+// The wrist HUD (wrist_hud.hpp) above that ring: a health bar, green to
+// yellow to red as it empties, a pale trail of the last hit draining after
+// it, and at its right end a round heal button with a cross that grows as
+// the right index finger nears it and lights up while it heals. An unknown
+// health (the game's not read) shows the empty bar dashed. `hand` as for
+// appendSlowMotionMeter.
+void appendWristHud(std::vector<Vertex>& out, const wrist_hud::View& view, Pose hand, Vec3 viewer, float pixelAngle,
+                    float seconds);
 // The combat marks below are printed, as the graphics of Spidy's videos are
 // (their style system: flat plates of colour, every shape keyed in ink, a
 // hard drop where a shadow would be, lettering out of register as it lands),

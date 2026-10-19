@@ -56,6 +56,7 @@ Expand-Archive -LiteralPath $pythonZip -DestinationPath (Join-Path $stage 'pytho
 Add-Content -LiteralPath (Join-Path $stage 'python\python312._pth') -Value '..\tools' -Encoding ascii
 Copy-Item -LiteralPath (Join-Path $root 'docs\PLAYERS.md') -Destination (Join-Path $stage 'README.txt')
 Copy-Item -LiteralPath (Join-Path $root 'docs\LINUX.md') -Destination $stage
+Copy-Item -LiteralPath (Join-Path $root 'Replay Spidy tutorial.cmd') -Destination $stage
 Copy-Item -LiteralPath (Join-Path $root 'LICENSE') -Destination (Join-Path $stage 'LICENSE.txt')
 Copy-Item -LiteralPath (Join-Path $root 'THIRD_PARTY_NOTICES.md') -Destination $stage
 Copy-Item -Path (Join-Path $root 'docs\licenses\*') -Destination (Join-Path $stage 'docs\licenses')

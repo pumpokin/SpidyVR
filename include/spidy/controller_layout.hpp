@@ -40,15 +40,21 @@ enum class ControllerInput : uint8_t {
     dpadLeft,
     dpadRight,
 };
-// Controls only the Steam Frame has. XrRuntime makes their actions only where
-// the runtime knows that controller: every other runtime gets the actions it
-// got before.
+// Controls only the Steam Frame has as buttons of their own. XrRuntime makes
+// their actions only where a layout binds one; the Index binds D-pad down
+// (heal) to its right trackpad, so its runtimes get those actions too.
 constexpr bool frameOnly(ControllerInput input) {
     return input >= ControllerInput::view;
 }
+
 // The layout the runtime uses for a hand's controller (XrData::controllers).
 // `other`: one of the runtime's own, with none of Spidy's.
 enum class ControllerKind : uint32_t { none, touch, index, frame, other };
+// A Frame-only control another layout borrows on purpose: the Index's right
+// trackpad as the game's D-pad down, the heal.
+constexpr bool borrowedBy(ControllerKind kind, ControllerInput input) {
+    return kind == ControllerKind::index && input == ControllerInput::dpadDown;
+}
 constexpr const char* controllerName(ControllerKind kind) {
     switch (kind) {
     case ControllerKind::touch:
@@ -99,8 +105,13 @@ inline constexpr ControllerBinding touch[] = {
     {x, "/user/hand/left/input/x/click"},
     {menu, "/user/hand/left/input/menu/click"},
 };
-// Index: A and B on each hand, the left ones Spidy's X and Y. No menu
-// button: their system button is the runtime's.
+// Index: A and B on each hand, the left ones Spidy's X and Y. Their system
+// button is the runtime's, so the trackpads fill in for what the Touch
+// controllers have and the Index lacks: pressing the left trackpad down
+// firmly is the menu button (pause), the right one the game's D-pad down
+// (heal). A thumb only resting on a trackpad presses neither: its force
+// stays near 0 until it is pushed, and the runtime turns that value into a
+// press at its own threshold.
 inline constexpr ControllerBinding index[] = {
     {aim, "/user/hand/left/input/aim/pose"},
     {grip, "/user/hand/left/input/grip/pose"},
@@ -120,6 +131,8 @@ inline constexpr ControllerBinding index[] = {
     {y, "/user/hand/left/input/b/click"},
     {b, "/user/hand/right/input/b/click"},
     {x, "/user/hand/left/input/a/click"},
+    {menu, "/user/hand/left/input/trackpad/force"},
+    {dpadDown, "/user/hand/right/input/trackpad/force"},
 };
 // Steam Frame: A, B, X, Y and Menu on the right, the D-pad and View on the
 // left. Its bumpers have no name the sources agree on (Valve's page says

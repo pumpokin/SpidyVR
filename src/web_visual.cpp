@@ -547,6 +547,80 @@ void appendSlowMotionMeter(std::vector<Vertex>& out, const SlowMotionView& view,
             softTriangle(out, shape, view3, shadow ? shadowColor : mix(glass, fill, .35f),
                          opacity * (shadow ? .55f : .9f), shadow ? 1.2f * px : 0.f, shadow ? 1.6f * px : soft);
 }
+void appendWristHud(std::vector<Vertex>& out, const wrist_hud::View& view, Pose hand, Vec3 viewer, float pixelAngle,
+                    float seconds) {
+    if (!view.shown || !std::isfinite(pixelAngle) || pixelAngle <= 0)
+        return;
+    const auto l = wrist_hud::layout(hand, viewer, view.up);
+    if (!l.valid)
+        return;
+    const auto unit = [](float v) { return std::isfinite(v) ? std::clamp(v, 0.f, 1.f) : 0.f; };
+    const float distance = length(viewer - l.ring);
+    const float px = pixelAngle * distance, soft = std::max(.8f * px, .0003f);
+    const float t = std::isfinite(seconds) ? seconds : 0.f;
+    const Vec3 v = l.view, right = l.right, up = l.up;
+    constexpr Vec3 green{.18f, .85f, .25f}, yellow{1.f, .78f, .08f}, red{1.f, .12f, .08f},
+        paper{.93f, .91f, .86f}, track{.06f, .07f, .09f};
+    const float health = unit(view.health), trail = std::max(unit(view.trail), health);
+    const float hurt = unit(view.hurt), healed = unit(view.healed), hover = unit(view.hover);
+    // Green while more than half is left, yellow to a quarter, then red, which
+    // pulses while that low.
+    Vec3 fill = health > .5f ? mix(yellow, green, std::clamp((health - .5f) / .2f, 0.f, 1.f))
+                             : mix(red, yellow, std::clamp((health - .25f) / .15f, 0.f, 1.f));
+    if (view.known && health <= .25f)
+        fill = mix(fill, paper, .25f * (.5f + .5f * std::sin(t * 9.f)));
+    fill = mix(fill, paper, .45f * healed);
+    // The bar: a dark backing that keeps it readable on the sky, the empty
+    // track, the trail, then the fill, each a bar along the same line.
+    const float h = l.barHalf, span = length(l.barEnd - l.barStart);
+    const Vec3 along = (l.barEnd - l.barStart) / std::max(span, 1e-6f);
+    const auto at = [&](float f) { return l.barStart + along * (span * f); };
+    softBar(out, l.barStart, l.barEnd, v, h + 2.2f * px + .0012f, shadowColor, .6f, 1.8f * px);
+    if (hurt > 0)
+        softBar(out, l.barStart, l.barEnd, v, h + .0022f, red, .55f * hurt, 2.5f * px + .001f);
+    softBar(out, l.barStart, l.barEnd, v, h, track, .85f, soft);
+    if (!view.known) {
+        // Not read from the game: the track dashed, no fill.
+        constexpr int dashes = 7;
+        for (int i = 0; i < dashes; ++i) {
+            const float a = (i + .2f) / dashes, b = (i + .8f) / dashes;
+            softBar(out, at(a), at(b), v, h * .35f, paper, .35f, soft);
+        }
+    } else {
+        // softBar squares its ends off half its height beyond them: inset the
+        // ends so a part never pokes past the track.
+        const auto part = [&](float from, float to, float half, Vec3 color, float alpha) {
+            const float inset = half / std::max(span, 1e-6f);
+            if (to - from <= 2 * inset + 1e-4f)
+                return;
+            softBar(out, at(from + inset), at(to - inset), v, half, color, alpha, soft);
+        };
+        if (trail > health + .002f)
+            part(health, trail, h * .8f, paper, .7f);
+        if (health > .002f)
+            part(0, health, h * .8f, fill, 1);
+        // Quarter marks, so a glance reads how much is left.
+        for (const float q : {.25f, .5f, .75f}) {
+            const Vec3 c = at(q);
+            softBar(out, c - up * (h * .8f), c + up * (h * .8f), v, .45f * px + .0002f, shadowColor, .5f, soft);
+        }
+    }
+    // The heal button: a dark disc, a green rim, and a cross. Nearer the
+    // finger it grows and brightens; heals, it fills green.
+    const float pressed = view.pressed ? 1.f : 0.f;
+    const float r = l.buttonRadius * (1 + .18f * hover) * (1 - .1f * pressed);
+    const Vec3 rim = mix(mix(green, paper, .15f * hover), paper, .3f * healed);
+    softArc(out, l.button, right, up, 0, r + 2 * px + .001f, 0, 2 * pi, shadowColor, .6f, 1.8f * px, 48);
+    softArc(out, l.button, right, up, 0, r, 0, 2 * pi, mix(track, green, pressed * .9f), .9f, soft, 48);
+    if (hover > 0 && !view.pressed)
+        softArc(out, l.button, right, up, r + .0012f, r + .0012f + .0016f * hover, 0, 2 * pi, rim,
+                .5f * hover * (.7f + .3f * std::sin(t * 7.f)), soft, 48);
+    softArc(out, l.button, right, up, r - .0016f, r, 0, 2 * pi, rim, 1, soft, 48);
+    const float arm = r * .52f, thick = r * .14f;
+    const Vec3 crossColor = view.pressed ? paper : mix(green, paper, .25f + .35f * hover);
+    softBar(out, l.button - right * arm, l.button + right * arm, v, thick, crossColor, 1, soft);
+    softBar(out, l.button - up * arm, l.button + up * arm, v, thick, crossColor, 1, soft);
+}
 void appendImpact(std::vector<Vertex>& out, const ImpactView& impact, Vec3 viewer, float pixelAngle) {
     const float distance = length(viewer - impact.point);
     if (!finite(impact.point) || !finite(viewer) || !std::isfinite(pixelAngle) || pixelAngle <= 0 ||

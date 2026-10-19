@@ -21,6 +21,14 @@ struct Player {
 bool find(uintptr_t base, Player& out);
 // The player's components are still registered and still belong to its actor.
 bool live(uintptr_t base, const Player& player);
+// The hero's health component on the player's actor (vtable 38a6df0, the one
+// tools/probe_game_body.py reads), or 0: none registered on that actor.
+uintptr_t heroHealth(uintptr_t base, uintptr_t record);
+// It is still registered on that actor.
+bool healthLive(uintptr_t base, uintptr_t health, uintptr_t record);
+// Its hit points (Health +0x88, docs/REFERENCE.md): false when unreadable or
+// not a finite number.
+bool hitPoints(uintptr_t health, float& out);
 
 // Keeps finding the player on its own thread: a registry scan takes a few
 // milliseconds, too long for the headset's frame loop.
@@ -34,6 +42,8 @@ class Watch {
     // The live player (all zero while there is none), and how many times
     // the answer has changed.
     Player current(uint64_t& changes) const;
+    // The live player's health component (0: none found yet).
+    uintptr_t health() const;
 
   private:
     void run();
@@ -44,5 +54,6 @@ class Watch {
     bool stopping_{};
     Player player_{};
     uint64_t changes_{};
+    uintptr_t health_{};
 };
 } // namespace spidy::game_player
