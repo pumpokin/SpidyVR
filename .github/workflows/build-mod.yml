@@ -1,0 +1,39 @@
+# Builds this fork's modded Spidy (Index pause/heal, wrist HUD, tutorial) on every push to its
+# branch, and keeps the player zip with the run: Actions > Build mod > the latest run > Artifacts.
+# Unlike Release, it publishes nothing and needs no secrets (the build is unsigned).
+name: Build mod
+on:
+  push:
+    branches: ['index-hud-tutorial']
+  workflow_dispatch:
+
+defaults:
+  run:
+    shell: pwsh
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12' # the Python that tools/package.ps1 ships
+
+      - name: Fetch the pinned OpenXR SDK, Dear ImGui and MinHook
+        run: ./tools/bootstrap.ps1 -Observer
+
+      - name: Build and run the C++ tests
+        run: ./tools/build.ps1 -Observer
+
+      - name: Package
+        run: ./tools/package.ps1
+
+      - name: Keep the zip with this run
+        uses: actions/upload-artifact@v7
+        with:
+          name: Spidy-modded-win64
+          path: dist/*.zip
+          retention-days: 30
