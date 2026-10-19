@@ -122,6 +122,11 @@ bool up(uintptr_t base, const Candidate&);
 inline bool fighting(uintptr_t base, const Candidate& c) {
     return enemy(c) && up(base, c);
 }
+// An enemy striking or about to (the spider-sense): his state machine's state
+// is one whose class names an attack - a blow (Attack, Melee, Lunge...) or,
+// `ranged`, a shot (Shoot, Fire, Aim...) - and none that names being hit.
+// By the class names the game keeps for its states, not by a list of them.
+bool threat(uintptr_t base, const Candidate&, bool& ranged);
 // A device that still stands: one with hit points left, where it has any
 // (a turret torn off and thrown has none).
 bool standing(const Candidate& device);

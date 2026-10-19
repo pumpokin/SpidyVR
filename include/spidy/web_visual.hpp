@@ -1,4 +1,5 @@
 #pragma once
+#include "spider_sense.hpp"
 #include "wrist_hud.hpp"
 #include "slow_motion.hpp"
 #include "vertex.hpp"
@@ -253,6 +254,11 @@ void appendSlowMotionMeter(std::vector<Vertex>& out, const SlowMotionView& view,
 // appendSlowMotionMeter.
 void appendWristHud(std::vector<Vertex>& out, const wrist_hud::View& view, Pose hand, Vec3 viewer, float pixelAngle,
                     float seconds);
+// The spider-sense flash (spider_sense.hpp): jagged lines springing out from
+// the edge of the view toward the threat, as the comics draw the tingle, white
+// for a blow and red for a shot; they kick out as the warning begins, flicker,
+// and fade with it. pixelAngle as for appendWeb.
+void appendSpiderSense(std::vector<Vertex>& out, const spider_sense::View& view, Vec3 viewer, float pixelAngle);
 // The combat marks below are printed, as the graphics of Spidy's videos are
 // (their style system: flat plates of colour, every shape keyed in ink, a
 // hard drop where a shadow would be, lettering out of register as it lands),

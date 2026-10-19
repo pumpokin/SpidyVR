@@ -14,6 +14,7 @@
 #include "spidy/gadget_wheel.hpp"
 #include "spidy/controller_layout.hpp"
 #include "spidy/tutorial.hpp"
+#include "spidy/spider_sense.hpp"
 #include "spidy/web_align.hpp"
 #include "spidy/wrist_hud.hpp"
 #include "spidy/game_swing.hpp"
@@ -2692,6 +2693,32 @@ int main() {
         ++f.predictedDisplayTime;
         m=rig.update(f,{0,0,0},{0,0,-1},true);
         check(m.headPose.orientation.rotate({0,1,0}).y>.999f,"upright again without it");
+    });
+    test("spider-sense: a threat near flashes on his side and buzzes once, harder on his side", [] {
+        using namespace spider_sense;
+        SpiderSense sense;
+        const Pose head{{0,1.7f,0},{}};
+        // A thug winding up 3 m to the right.
+        const std::vector<Threat> right{{7,{3,1.2f,0},false}};
+        const auto first=sense.update(.011f,right,head);
+        check(first.now && first.hands[1]>first.hands[0],"a new threat buzzes, the right hand harder");
+        const auto view=sense.view(head);
+        check(view.strength==1 && !view.ranged,"a full white flash");
+        check(view.centre.x>.3f && view.out.x>.8f,"on his side of the view");
+        check(!sense.update(.011f,right,head).now,"the same wind-up buzzes once");
+        for (int i=0;i<100;++i)
+            sense.update(.011f,{},head);
+        check(sense.strength()==0,"it fades once he stops");
+        check(sense.update(.011f,right,head).now,"he winds up again: warned again");
+        // Too far for a blow; near enough for a shot.
+        SpiderSense far;
+        check(!far.update(.011f,{{8,{0,1.2f,-20},false}},head).now,"a blow 20 m off is no threat yet");
+        check(far.update(.011f,{{9,{0,1.2f,-20},true}},head).now && far.view(head).ranged,"a shot 20 m off is");
+        // Behind the player: the lines still show, at a side of the view.
+        SpiderSense behind;
+        behind.update(.011f,{{10,{-.5f,1.2f,4},false}},head);
+        const auto back=behind.view(head);
+        check(back.strength==1 && dot(back.centre-head.position,Vec3{0,0,-1})>0,"shown ahead, where it can be seen");
     });
     test("virtual travel cannot trigger yank", [] {
         TestWorld w;
@@ -8825,19 +8852,22 @@ int main() {
             for (const char* c : row.choices)
                 check(c && *c, "an empty choice");
         }
-        check(headings == 5 && all[0].item == Item::none && all[6].item == Item::none && all[8].item == Item::none &&
+        check(headings == 6 && all[0].item == Item::none && all[6].item == Item::none && all[8].item == Item::none &&
                   all[16].item == Item::none,
               "the sections: webs, body, comfort, experimental");
         check(all[17].item == Item::flips && all[17].choices.empty() && std::strcmp(all[16].title, "EXPERIMENTAL") == 0,
               "the flips: a switch under EXPERIMENTAL");
-        check(all.size() == 23 && all[18].item == Item::flipSpeed && all[18].choices.size() == std::size(flipSpeeds),
+        check(all.size() == 25 && all[18].item == Item::flipSpeed && all[18].choices.size() == std::size(flipSpeeds),
               "the flip speed under the flips");
         check(all[19].item == Item::none && std::strcmp(all[19].title, "SWING FEEL") == 0 &&
                   all[20].item == Item::armSensitivity && all[20].choices.size() == std::size(armSensitivities) &&
                   all[21].item == Item::swingAssist && all[21].choices.size() == 4 &&
                   all[22].item == Item::webAlign && all[22].choices.size() == 3 &&
                   std::strcmp(all[22].choices[2], "BODY + VIEW") == 0,
-              "arm sensitivity, swing assist and web align under SWING FEEL, the last rows");
+              "arm sensitivity, swing assist and web align under SWING FEEL");
+        check(all[23].item == Item::none && std::strcmp(all[23].title, "COMBAT") == 0 &&
+                  all[24].item == Item::spiderSense && all[24].choices.size() == 4 && Values{}.spiderSense == 3,
+              "SPIDER-SENSE under COMBAT, the last row, on (both) by default");
         {
             Values v;
             check(v.swingAssist == 0 && v.webAlign == 0 && choose(Item::swingAssist, 3, v) && v.swingAssist == 3 &&

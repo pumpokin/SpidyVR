@@ -158,7 +158,7 @@ if(SPIDY_BUILD_XR)
   target_link_libraries(spidy_openxr PUBLIC spidy_d3d12 openxr_loader)
   target_compile_definitions(spidy_openxr PUBLIC XR_USE_PLATFORM_WIN32 XR_USE_GRAPHICS_API_D3D12)
   if(SPIDY_BUILD_OBSERVER)
-    target_sources(spidy_stereo_probe PRIVATE src/game_xr.cpp src/game_player.cpp src/game_pad.cpp
+    target_sources(spidy_stereo_probe PRIVATE src/game_xr.cpp src/game_player.cpp src/game_targets.cpp src/game_pad.cpp
                    src/game_menu.cpp src/game_time.cpp src/game_prompts.cpp src/game_steam.cpp)
     target_link_libraries(spidy_stereo_probe PRIVATE spidy_openxr)
   endif()

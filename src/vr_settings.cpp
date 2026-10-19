@@ -28,6 +28,7 @@ constexpr const char* depthChoices[] = {"OFF", "LOW", "MEDIUM", "HIGH"};
 constexpr const char* armChoices[] = {"50%", "75%", "100%", "125%", "150%", "200%", "300%"};
 constexpr const char* assistChoices[] = {"OFF", "LOW", "MEDIUM", "HIGH"};
 constexpr const char* alignChoices[] = {"OFF", "BODY", "BODY + VIEW"};
+constexpr const char* senseChoices[] = {"OFF", "VISUAL", "VIBRATION", "BOTH"};
 constexpr int screenSizes[] = {0, 1, 2};
 constexpr int hudSizes[] = {0, 1, 2, 3};
 constexpr int depthSteps[] = {0, 1, 2, 3};
@@ -38,7 +39,8 @@ static_assert(std::size(swingChoices) == std::size(swingSpeeds) && std::size(sna
               std::size(flipSpeedChoices) == std::size(flipSpeeds) &&
               std::size(depthChoices) == std::size(depthSteps) && std::size(depthSteps) == std::size(screenDepths) &&
               std::size(armChoices) == std::size(armSensitivities) &&
-              std::size(assistChoices) == std::size(swingAssists) && std::size(alignChoices) == std::size(webAligns));
+              std::size(assistChoices) == std::size(swingAssists) && std::size(alignChoices) == std::size(webAligns) &&
+              std::size(senseChoices) == std::size(spiderSenses));
 // A list setting's steps, or none for a switch.
 std::span<const int> steps(Item item) {
     switch (item) {
@@ -66,6 +68,8 @@ std::span<const int> steps(Item item) {
         return swingAssists;
     case Item::webAlign:
         return webAligns;
+    case Item::spiderSense:
+        return spiderSenses;
     default:
         return {};
     }
@@ -96,6 +100,8 @@ float numberOf(Item item, const Values& v) {
         return static_cast<float>(v.swingAssist);
     case Item::webAlign:
         return static_cast<float>(v.webAlign);
+    case Item::spiderSense:
+        return static_cast<float>(v.spiderSense);
     default:
         return 0;
     }
@@ -136,11 +142,12 @@ Values sanitized(Values v) {
     v.armSensitivity = std::clamp(v.armSensitivity, 25, 400);
     v.swingAssist = std::clamp(v.swingAssist, 0, 3);
     v.webAlign = std::clamp(v.webAlign, 0, 2);
+    v.spiderSense = std::clamp(v.spiderSense, 0, 3);
     return v;
 }
-const std::array<Row, 23>& rows() {
+const std::array<Row, 25>& rows() {
     // The help fits the game's description column beside the rows.
-    static const std::array<Row, 23> all{{
+    static const std::array<Row, 25> all{{
         {Item::none, "WEBS", nullptr, {}},
         {Item::webButton, "WEB BUTTON",
          "Which button shoots and holds a web; the other reels in and shoots web balls.", webButtonChoices},
@@ -180,6 +187,9 @@ const std::array<Row, 23>& rows() {
          "Keeps a swing going where you look instead of into the web's building.", assistChoices},
         {Item::webAlign, "WEB ALIGN",
          "Lean up the web as you swing. BODY + VIEW tilts your view too (intense).", alignChoices},
+        {Item::none, "COMBAT", nullptr, {}},
+        {Item::spiderSense, "SPIDER-SENSE",
+         "Before an enemy strikes: lines flash on his side, the controllers buzz.", senseChoices},
     }};
     return all;
 }
@@ -244,6 +254,9 @@ bool choose(Item item, int index, Values& v) {
         break;
     case Item::webAlign:
         v.webAlign = s[index];
+        break;
+    case Item::spiderSense:
+        v.spiderSense = s[index];
         break;
     default:
         return false;

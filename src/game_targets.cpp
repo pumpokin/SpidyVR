@@ -44,6 +44,25 @@ constexpr uint32_t trait(Trait t) {
 // from the two the scan knows by their vtables), and a state of a bot's
 // state machine that has him out of the fight.
 constexpr uint32_t downState = 1u << 5, healthClass = 1u << 6, botHealthClass = 1u << 7;
+// A state of a bot's state machine that has him striking or about to (the
+// spider-sense's threats), and one of those that is a shot rather than a blow.
+// By name, not by class: a bot state whose class (or a class it derives from)
+// says it attacks, and none that says it is hit or reacting.
+constexpr uint32_t attackState = 1u << 24, rangedState = 1u << 25;
+uint32_t attackBits(const char* name) {
+    if (std::strncmp(name, ".?AVBotState", 12) != 0)
+        return 0;
+    for (const char* calm : {"Hit", "React", "Stagger", "Stun", "Death", "Ragdoll", "Knock", "Idle", "Webbed", "Flinch"})
+        if (std::strstr(name, calm))
+            return 0;
+    for (const char* shot : {"Shoot", "Fire", "Gun", "Ranged", "Projectile", "Throw", "Aim", "Snipe", "Rocket"})
+        if (std::strstr(name, shot))
+            return attackState | rangedState;
+    for (const char* blow : {"Attack", "Melee", "Lunge", "Charge", "Swing", "Strike", "Punch", "Kick", "Slam"})
+        if (std::strstr(name, blow))
+            return attackState;
+    return 0;
+}
 constexpr Rule rules[] = {
     {".?AVThrowableHelper@@", marker(Kind::throwable)},
     {".?AVBotMoverManager@@", marker(Kind::bot)},
@@ -97,10 +116,12 @@ uint32_t classify(uintptr_t base, uintptr_t vtable, std::unordered_map<uint32_t,
         if (known == types.end()) {
             char name[64]{};
             uint32_t own{};
-            if (typeName(base + type, name))
+            if (typeName(base + type, name)) {
                 for (const auto& rule : rules)
                     if (!std::strcmp(name, rule.name))
                         own |= rule.bits;
+                own |= attackBits(name);
+            }
             known = types.emplace(type, own).first;
         }
         bits |= known->second;
@@ -227,6 +248,13 @@ bool game_targets::up(uintptr_t base, const Candidate& c) {
     if (c.kind != Kind::bot || !inPlay(c) || (health(c, points) && points <= 0))
         return false;
     return !c.machine || !(classOf(base, pointer(pointer(c.machine + 0x70))) & downState);
+}
+bool game_targets::threat(uintptr_t base, const Candidate& c, bool& ranged) {
+    if (!c.machine || !inPlay(c))
+        return false;
+    const uint32_t bits = classOf(base, pointer(pointer(c.machine + 0x70)));
+    ranged = (bits & rangedState) != 0;
+    return (bits & attackState) && !(bits & downState);
 }
 bool game_targets::standing(const Candidate& c) {
     float points{};

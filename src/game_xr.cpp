@@ -16,6 +16,8 @@
 #include "spidy/game_prompts.hpp"
 #include "spidy/game_player.hpp"
 #include "spidy/game_punch.hpp"
+#include "spidy/game_targets.hpp"
+#include "spidy/spider_sense.hpp"
 #include "spidy/gadget_wheel.hpp"
 #include "spidy/game_shooter.hpp"
 #include "spidy/game_steam.hpp"
@@ -466,7 +468,8 @@ void keepSettings(const vr_settings::Values& v) {
         return;
     const std::string text = "arm_sensitivity=" + std::to_string(v.armSensitivity) +
                              "\nswing_assist=" + std::to_string(v.swingAssist) +
-                             "\nweb_align=" + std::to_string(v.webAlign) + "\n";
+                             "\nweb_align=" + std::to_string(v.webAlign) +
+                             "\nspider_sense=" + std::to_string(v.spiderSense) + "\n";
     DWORD written{};
     WriteFile(file, text.data(), static_cast<DWORD>(text.size()), &written, nullptr);
     CloseHandle(file);
@@ -641,6 +644,8 @@ DWORD WINAPI run(void*) {
     // VR starts with the game, before there is a player; each loaded save,
     // respawn or character switch brings a new one.
     game_player::Watch players;
+    // The bots around the player, for the spider-sense (spider_sense.hpp).
+    game_targets::Watch enemies;
     bool padInstalled{};
     try {
         auto queue = reinterpret_cast<ID3D12CommandQueue*>(config.queue);
@@ -672,6 +677,7 @@ DWORD WINAPI run(void*) {
         uint64_t snapshotTicket{}, gapGeneration{};
         message(2, 0, "Waiting for the headset");
         players.start(config.base);
+        enemies.start(config.base, 1u << static_cast<unsigned>(game_targets::Kind::bot));
         game_player::Player player{};
         uint64_t playerChanges{}, playersFound{};
         // Menus are played with a virtual Xbox controller (game_pad).
@@ -841,10 +847,15 @@ DWORD WINAPI run(void*) {
             values.armSensitivity = keptSetting(kept, "arm_sensitivity", values.armSensitivity);
             values.swingAssist = keptSetting(kept, "swing_assist", values.swingAssist);
             values.webAlign = keptSetting(kept, "web_align", values.webAlign);
+            values.spiderSense = keptSetting(kept, "spider_sense", values.spiderSense);
         }
         values = vr_settings::sanitized(values);
         // What settings.txt holds, so a change writes it once.
-        int keptArm = values.armSensitivity, keptAssist = values.swingAssist, keptAlign = values.webAlign;
+        int keptArm = values.armSensitivity, keptAssist = values.swingAssist, keptAlign = values.webAlign,
+            keptSense = values.spiderSense;
+        spider_sense::SpiderSense spiderSense;
+        std::vector<game_targets::Candidate> nearBots;
+        std::vector<spider_sense::Threat> threats;
         // WEB ALIGN: the lean up the web (web_align.hpp).
         web_align::WebAlign webAlign;
         game_menu::publish(values);
@@ -1499,10 +1510,11 @@ DWORD WINAPI run(void*) {
                         ++settingChanges;
                         applySettings();
                         if (values.armSensitivity != keptArm || values.swingAssist != keptAssist ||
-                            values.webAlign != keptAlign) {
+                            values.webAlign != keptAlign || values.spiderSense != keptSense) {
                             keptArm = values.armSensitivity;
                             keptAssist = values.swingAssist;
                             keptAlign = values.webAlign;
+                            keptSense = values.spiderSense;
                             keepSettings(values);
                         }
                     }
@@ -2871,6 +2883,31 @@ DWORD WINAPI run(void*) {
                     saved.screenPose = screenPose;
                     saved.screenAspect = SpidyFlatAspect();
                     saved.slow = moments.view(slowMotion.view());
+                    // The spider-sense: enemies in play striking or about to, near
+                    // enough to matter; a flash on their side and a buzz.
+                    {
+                        threats.clear();
+                        const bool sensing = values.spiderSense != spider_sense::off && steering &&
+                                             mapping == game_pad::Mapping::gameplay;
+                        if (sensing) {
+                            enemies.current(nearBots);
+                            for (const auto& bot : nearBots) {
+                                bool ranged{};
+                                Vec3 at{};
+                                if (game_targets::fighting(config.base, bot) &&
+                                    game_targets::threat(config.base, bot, ranged) && game_targets::position(bot, at))
+                                    threats.push_back({bot.record, at + Vec3{0, 1.2f, 0}, ranged});
+                            }
+                        }
+                        const auto buzz = spiderSense.update(frame.seconds, threats, motion.headPose);
+                        if (buzz.now && (values.spiderSense == spider_sense::vibration ||
+                                         values.spiderSense == spider_sense::both)) {
+                            runtime.haptic(0, buzz.hands[0], .12f);
+                            runtime.haptic(1, buzz.hands[1], .12f);
+                        }
+                        if (values.spiderSense == spider_sense::visual || values.spiderSense == spider_sense::both)
+                            saved.sense = spiderSense.view(motion.headPose);
+                    }
                     // The wrist HUD: the player's health as the game has it now,
                     // and the heal button as the finger left it.
                     {
@@ -3259,6 +3296,13 @@ DWORD WINAPI run(void*) {
                             appendWristHud(translucent, saved->wrist, wrist, viewer, pixelAngle,
                                            static_cast<float>(clock));
                         }
+                        // The spider-sense, moved with the player to this image as the
+                        // head is.
+                        if (!saved->flatScreen && saved->sense.strength > 0) {
+                            auto sense = saved->sense;
+                            sense.centre += travel;
+                            appendSpiderSense(translucent, sense, viewer, pixelAngle);
+                        }
                         // The bursts where the latest blows landed: fixed in the world.
                         if (!saved->flatScreen)
                             for (const auto& burst : bursts) {
@@ -3457,6 +3501,7 @@ DWORD WINAPI run(void*) {
         error = 1;
         failure = e.what();
     }
+    enemies.stop();
     players.stop();
     if (padInstalled)
         game_pad::uninstall();

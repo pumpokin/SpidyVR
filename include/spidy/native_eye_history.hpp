@@ -32,6 +32,8 @@ struct NativeEyeFrame {
     SlowMotionView slow{};
     // The wrist HUD: health and the heal button (wrist_hud.hpp).
     wrist_hud::View wrist{};
+    // The spider-sense flash (spider_sense.hpp; strength 0: none).
+    spider_sense::View sense{};
     // The tutorial's card (tutorial.hpp; stage off: none).
     tutorial::View tutorial{};
     // The gadget wheel, open while X is held (gadget_wheel.hpp).

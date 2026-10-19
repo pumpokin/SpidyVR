@@ -620,6 +620,44 @@ void appendWristHud(std::vector<Vertex>& out, const wrist_hud::View& view, Pose 
     softBar(out, l.button - right * arm, l.button + right * arm, v, thick, crossColor, 1, soft);
     softBar(out, l.button - up * arm, l.button + up * arm, v, thick, crossColor, 1, soft);
 }
+void appendSpiderSense(std::vector<Vertex>& out, const spider_sense::View& view, Vec3 viewer, float pixelAngle) {
+    const float strength = std::isfinite(view.strength) ? std::clamp(view.strength, 0.f, 1.f) : 0.f;
+    if (strength <= 0 || !finite(view.centre) || !finite(view.out) || !finite(view.up) || !finite(viewer) ||
+        !std::isfinite(pixelAngle) || pixelAngle <= 0)
+        return;
+    const float distance = length(view.centre - viewer);
+    if (!(distance > .1f && distance < 5))
+        return;
+    const Vec3 sight = (viewer - view.centre) / distance;
+    const float px = pixelAngle * distance, soft = std::max(.8f * px, .0003f);
+    const float age = std::isfinite(view.age) ? std::max(view.age, 0.f) : 0.f;
+    // Out with a kick as it begins, then a nervous flicker while it lasts.
+    const float kick = 1 + .6f * std::exp(-age / .08f);
+    const float flicker = .8f + .2f * std::sin(age * 47.f) * std::sin(age * 23.f + 1.3f);
+    const Vec3 color = view.ranged ? Vec3{1.f, .18f, .08f} : Vec3{.95f, .97f, 1.f};
+    const float opacity = strength * flicker;
+    // Five jagged strokes fanned round the way to the threat, each three
+    // zigzags long, the middle one longest.
+    constexpr int strokes = 5;
+    const float reach = .13f * distance * kick, width = .0032f * distance;
+    for (int s = 0; s < strokes; ++s) {
+        const float spread = (static_cast<float>(s) - (strokes - 1) / 2.f) * .42f;
+        const Vec3 way = view.out * std::cos(spread) + view.up * std::sin(spread);
+        const Vec3 side = view.up * std::cos(spread) - view.out * std::sin(spread);
+        const float length = reach * (s == strokes / 2 ? 1.f : s == 0 || s == strokes - 1 ? .6f : .8f);
+        const Vec3 start = view.centre + way * (.03f * distance);
+        Vec3 points[7];
+        for (int k = 0; k < 7; ++k) {
+            const float along = length * static_cast<float>(k) / 6;
+            const float zig = (k % 2 ? 1.f : -1.f) * (k == 0 || k == 6 ? 0.f : .0065f * distance);
+            points[k] = start + way * along + side * zig;
+        }
+        for (const bool shadow : {true, false})
+            for (int k = 0; k < 6; ++k)
+                softBar(out, points[k], points[k + 1], sight, width + (shadow ? 1.5f * px : 0.f),
+                        shadow ? shadowColor : color, opacity * (shadow ? .5f : 1.f), shadow ? 1.8f * px : soft);
+    }
+}
 void appendImpact(std::vector<Vertex>& out, const ImpactView& impact, Vec3 viewer, float pixelAngle) {
     const float distance = length(viewer - impact.point);
     if (!finite(impact.point) || !finite(viewer) || !std::isfinite(pixelAngle) || pixelAngle <= 0 ||
