@@ -20,18 +20,19 @@ float headYaw(Pose head, float fallback) {
 
 std::string buttonName(char button, ControllerKind kind) {
     if (kind == ControllerKind::index) {
-        // Spidy's X and Y are the Index's left A and B; it has no menu button.
+        // Spidy's X and Y are the Index's left A and B; it has no menu button:
+        // the left trackpad pressed down pauses.
         switch (button) {
         case 'A':
-            return "RIGHT A";
+            return "RIGHT A BUTTON";
         case 'B':
-            return "RIGHT B";
+            return "RIGHT B BUTTON";
         case 'X':
-            return "LEFT A";
+            return "LEFT A BUTTON";
         case 'Y':
-            return "LEFT B";
+            return "LEFT B BUTTON";
         case 'M':
-            return "THE LEFT TRACKPAD, PRESSED DOWN,";
+            return "LEFT TRACKPAD (PRESS IT DOWN)";
         default:
             break;
         }
@@ -42,37 +43,46 @@ std::string buttonName(char button, ControllerKind kind) {
 }
 
 std::vector<Step> steps(const Wording& w) {
-    const std::string web = w.triggerWebs ? "TRIGGER" : "GRIP";
-    const std::string reel = w.triggerWebs ? "GRIP" : "TRIGGER";
+    const bool index = w.controller == ControllerKind::index;
     const auto b = [&](char c) { return buttonName(c, w.controller); };
-    const std::string healToo = w.controller == ControllerKind::index ? "OR PRESS THE RIGHT TRACKPAD DOWN"
-                                                                      : "OR HOLD THE RIGHT STICK DOWN";
+    // The web button and the reel button, named as the hands work them. The
+    // Index grip reads how hard the handle is squeezed: it wants a firm one.
+    const std::string shootWeb = w.triggerWebs ? "PULL A TRIGGER"
+                                 : index       ? "SQUEEZE A HANDLE FIRMLY (GRIP)"
+                                               : "SQUEEZE A GRIP";
+    const std::string reelIt = w.triggerWebs ? (index ? "SQUEEZE ITS HANDLE (GRIP)" : "SQUEEZE ITS GRIP")
+                                             : "PULL ITS TRIGGER";
+    const std::string reelName = w.triggerWebs ? (index ? "HANDLE (GRIP)" : "GRIP") : "TRIGGER";
+    const std::string stick = index ? "THUMBSTICK" : "STICK";
+    const std::string left = "LEFT " + stick, right = "RIGHT " + stick;
+    const std::string healToo = index ? "OR PRESS THE RIGHT TRACKPAD DOWN" : "OR HOLD THE RIGHT STICK DOWN";
     return {
         {"WEB SWINGING",
-         {"POINT AT A BUILDING AND SQUEEZE A " + web, "THAT HAND SHOOTS A WEB: HOLD ON AND SWING",
-          "LET GO TO RELEASE IT. SWAP HANDS TO KEEP GOING"},
+         {"POINT A HAND AT A BUILDING, " + shootWeb, "IT SHOOTS A WEB: KEEP SQUEEZING AND SWING",
+          "LET GO TO RELEASE. SWAP HANDS TO KEEP GOING"},
          Goal::swing},
         {"REEL IN",
-         {"WHILE A WEB HOLDS, PULL THE " + reel + " OF THAT HAND", "TO REEL YOURSELF IN AND PICK UP SPEED"},
+         {"WHILE A HAND HOLDS A WEB, " + reelIt, "TO REEL YOURSELF IN AND PICK UP SPEED"},
          Goal::reel},
         {"WEB ZIP",
-         {"WITH A WEB ATTACHED, YANK THAT HAND SHARPLY BACK", "AND YOU ZIP TO WHERE IT HOLDS",
-          "OR PUSH THE RIGHT STICK UP AND HOLD: ZIP TO A POINT"},
+         {"WITH A WEB HELD, YANK THAT HAND SHARPLY BACK TO ZIP",
+          "TOO HARD? RAISE ARM SENSITIVITY IN SETTINGS, SPIDY VR",
+          "OR HOLD THE " + right + " UP: ZIP TO A POINT"},
          Goal::zip},
         {"JUMP AND LEAP",
-         {b('A') + " JUMPS", "HOLD " + b('A') + " ON THE GROUND, THEN LET GO",
+         {"THE " + b('A') + " JUMPS", "HOLD IT ON THE GROUND, THEN LET GO",
           "FOR A CHARGED LEAP: THE LONGER, THE HIGHER"},
          Goal::jump},
         {"WALLS",
-         {"WALK, JUMP OR SWING INTO A WALL TO STICK TO IT", "THE LEFT STICK WALKS ON IT",
-          b('A') + " JUMPS OFF, A WEB PULLS YOU AWAY"},
+         {"WALK, JUMP OR SWING INTO A WALL TO STICK TO IT", "THE " + left + " WALKS ON IT",
+          "THE " + b('A') + " JUMPS OFF IT"},
          Goal::wall},
         {"WEB SHOOTER",
-         {"PULL THE " + reel + " OF A HAND WITH NO WEB", "TO SHOOT WEB BALLS FROM YOUR WRIST",
+         {"ON A HAND WITH NO WEB, PULL THE " + reelName, "TO SHOOT WEB BALLS FROM YOUR WRIST",
           "THREE HITS WEB AN ENEMY UP"},
          Goal::shot},
         {"PUNCH",
-         {"THROW A FAST FIST INTO AN ENEMY", "THROW IT AT ONE UP TO 10 M AWAY: YOU FLY IN",
+         {"THROW A FAST FIST INTO AN ENEMY", "AT ONE UP TO 10 M AWAY, YOU FLY IN AND HIT",
           "THE RING SHOWS WHO YOUR NEXT PUNCH HITS"},
          Goal::punch},
         {"CALLED BLOWS AND HOOKS",
@@ -88,24 +98,24 @@ std::vector<Step> steps(const Wording& w) {
           "AND HE SLAMS INTO THE GROUND"},
          Goal::slam},
         {"DODGE",
-         {b('B') + " DODGES THE WAY THE LEFT STICK POINTS", "DODGE WHEN YOUR SPIDER-SENSE FLASHES",
-          "PERFECT DODGES SLOW TIME"},
+         {"THE " + b('B') + " DODGES", "THE WAY THE " + left + " POINTS",
+          "DODGE WHEN YOUR SPIDER-SENSE FLASHES"},
          Goal::dodge},
         {"SLOW MOTION",
-         {"CLICK THE LEFT STICK TO SLOW TIME", "THE RING ON YOUR LEFT WRIST IS ITS FOCUS",
-          "CLICK AGAIN TO END IT"},
+         {"CLICK THE " + left + " IN TO SLOW TIME", "THE RING ON YOUR LEFT WRIST IS ITS FOCUS",
+          "CLICK IT AGAIN TO END IT"},
          Goal::slow},
         {"HEALTH AND HEALING",
-         {"YOUR HEALTH BAR IS ON YOUR LEFT WRIST", "POKE THE + BESIDE IT WITH YOUR RIGHT FINGER TO HEAL",
+         {"YOUR HEALTH BAR IS ON YOUR LEFT WRIST", "POKE THE + BESIDE IT WITH YOUR RIGHT FINGER",
           healToo},
          Goal::heal},
         {"GADGETS",
-         {"HOLD " + b('X') + ": A WHEEL OF GADGETS OPENS", "MOVE YOUR HAND TO ONE AND LET GO",
-          "A FREE HAND THEN FIRES IT WITH ITS " + reel},
+         {"HOLD THE " + b('X') + ": A GADGET WHEEL OPENS", "MOVE THAT HAND TO ONE AND LET GO",
+          "A FREE HAND FIRES IT WITH ITS " + reelName},
          Goal::gadget},
         {"PROMPTS AND MENUS",
-         {"LOOK AT WHAT THE GAME ASKS FOR AND PRESS " + b('Y'), "TAP " + b('X') + " FOR THE MAP, SUITS AND SKILLS",
-          b('M') + " PAUSES"},
+         {"LOOK AT WHAT THE GAME ASKS FOR, PRESS THE " + b('Y'), "TAP THE " + b('X') + ": MAP, SUITS, SKILLS",
+          "TO PAUSE: THE " + b('M')},
          Goal::none},
         {"YOU ARE READY",
          {"THAT IS EVERYTHING. GO SWING, SPIDEY!", "TO SEE THIS AGAIN, RUN REPLAY SPIDY TUTORIAL",
@@ -236,7 +246,8 @@ Choice Tutorial::update(float seconds, bool active, Pose head, const Fingers& fi
     }
     // A pointing fingertip at a button, just in front of the card or a little
     // through it, presses it once; it leaves before it presses again.
-    const auto list = buttons(stage_, step_, count(), done_);
+    const bool nothingToDo = step_ < count() && steps_[static_cast<size_t>(step_)].goal == Goal::none;
+    const auto list = buttons(stage_, step_, count(), done_ || nothingToDo);
     const Vec3 right = card_.orientation.rotate({1, 0, 0}), up = card_.orientation.rotate({0, 1, 0}),
                out = card_.orientation.rotate({0, 0, 1});
     Choice chosen = Choice::none;
@@ -367,13 +378,19 @@ void appendView(std::vector<Vertex>& out, const View& view, Vec3 viewer) {
         if (view.step < 0 || view.step >= static_cast<int>(all.size()))
             return;
         const auto& step = all[static_cast<size_t>(view.step)];
-        char count[32];
-        std::snprintf(count, sizeof count, "%d / %d", view.step + 1, view.count);
-        card.text(out, count, inner, .098f, .011f, grey, 1, .08f);
-        card.text(out, step.title, -inner, .09f, .022f, white, 0, 2 * inner - .09f);
+        char count[48];
+        std::snprintf(count, sizeof count, "%s%d / %d",
+                      view.wording.controller == ControllerKind::index ? "VALVE INDEX   " : "", view.step + 1,
+                      view.count);
+        card.text(out, count, inner, .098f, .011f, grey, 1, .15f);
+        card.text(out, step.title, -inner, .09f, .022f, white, 0, 2 * inner - .19f);
+        // One size for every line of the card: the largest at which all fit.
+        float height = lineHeight;
+        for (const auto& line : step.lines)
+            height = std::min(height, fittedHeight(line, lineHeight, 2 * inner));
         float y = .05f;
         for (const auto& line : step.lines) {
-            card.text(out, line, -inner, y, lineHeight, soft, 0, 2 * inner);
+            card.text(out, line, -inner, y, height, soft, 0, 2 * inner);
             y -= .024f;
         }
         if (step.goal != Goal::none) {
@@ -392,7 +409,13 @@ void appendView(std::vector<Vertex>& out, const View& view, Vec3 viewer) {
             }
         }
     }
-    const auto list = buttons(view.stage, view.step, view.count, view.done);
+    bool readOnly = false;
+    if (view.stage == Stage::step) {
+        const auto all = steps(view.wording);
+        readOnly = view.step >= 0 && view.step < static_cast<int>(all.size()) &&
+                   all[static_cast<size_t>(view.step)].goal == Goal::none;
+    }
+    const auto list = buttons(view.stage, view.step, view.count, view.done || readOnly);
     for (size_t i = 0; i < list.size() && i < view.hover.size(); ++i) {
         const auto& b = list[i];
         const float hover = std::clamp(view.hover[i], 0.f, 1.f);
