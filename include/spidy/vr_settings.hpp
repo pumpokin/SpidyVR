@@ -81,6 +81,14 @@ struct Values {
     // RECORDING FOV, how wide it sees, degrees across.
     int recordingView = 1;
     int recordingFov = 90;
+    // INDEX GRIP: how lightly the Index's grip may be squeezed to shoot and
+    // hold a web - 0 light (its force counts three times), 1 medium (twice),
+    // 2 firm (as it is). INDEX TRACKPAD PRESS: how hard a trackpad is pressed
+    // to heal, zip or pause (index_pads.hpp) - 0 light, 1 medium, 2 firm.
+    int indexGrip = 0, indexPad = 0;
+    // DODGE ASSIST (dodge_assist.hpp): 0 off, 1 aim (B at a warning dodges
+    // away from the attacker), 2 auto (red warnings dodge, yellow jump).
+    int dodgeAssist = 1;
     bool operator==(const Values&) const = default;
 };
 // The steps the game's Settings offer. The launcher's slider sets any swing
@@ -96,6 +104,14 @@ inline constexpr int swingAssists[] = {0, 1, 2, 3};
 inline constexpr int webAligns[] = {0, 1, 2};
 inline constexpr int recordingViews[] = {0, 1, 2};
 inline constexpr int recordingFovs[] = {60, 70, 80, 90, 100, 110};
+inline constexpr int indexGrips[] = {0, 1, 2};
+inline constexpr int indexPads[] = {0, 1, 2};
+inline constexpr int dodgeAssists[] = {0, 1, 2};
+// What INDEX GRIP multiplies the Index's grip force by.
+inline float gripGain(int choice) {
+    constexpr float gains[] = {3, 2, 1};
+    return gains[choice < 0 ? 0 : choice > 2 ? 2 : choice];
+}
 // The swing's factor for an ARM SENSITIVITY percent.
 inline float armFactor(int percent) {
     return static_cast<float>(percent < 25 ? 25 : percent > 400 ? 400 : percent) / 100;
@@ -158,8 +174,11 @@ enum class Item : uint8_t {
     webAlign,
     recordingView,
     recordingFov,
+    indexGrip,
+    indexPad,
+    dodgeAssist,
 };
-inline constexpr Item lastItem = Item::recordingFov;
+inline constexpr Item lastItem = Item::dodgeAssist;
 // The SPIDY VR tab, top to bottom: a section's heading (item none) or a
 // setting. The sections: WEBS, SWINGING, COMFORT, DISPLAY, BODY and
 // EXPERIMENTAL (the player, October 19: "sort the options in spidy vr
@@ -176,7 +195,7 @@ struct Row {
     // menu (the one with resume)").
     bool page{};
 };
-const std::array<Row, 27>& rows();
+const std::array<Row, 31>& rows();
 // The choice a setting shows for these values: a switch 0 (off) or 1 (on), a
 // list its step nearest to the value (a launcher value between two steps
 // shows the nearer one, the lower on a tie).

@@ -103,6 +103,8 @@ enum class Mapping {
 struct Walk {
     float right{}, forward{};
     bool jump{}, interact{}, dodge{}, pull{}, heal{}, zip{}, aim{};
+    // The suit power (suit_power.hpp's gesture): the game's L3 + R3.
+    bool suit{};
     // The game's RT, alone: its parkour. With the jump on the game's own wall
     // crawl it is the only way off the wall - A by itself, in any direction
     // of the stick, only leaps the hero along it (October 14, measured: back,
@@ -1139,6 +1141,8 @@ inline State fromControllers(const XrFrame& frame, Mapping mapping, const Walk& 
             s.rightTrigger = 255;
         if (walk.scan)
             s.buttons |= rightThumb;
+        if (walk.suit)
+            s.buttons |= leftThumb | rightThumb;
         s.thumbLX = stick(walk.right);
         s.thumbLY = stick(walk.forward);
         s.thumbRX = stick(walk.look);

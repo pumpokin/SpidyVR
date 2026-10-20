@@ -8,6 +8,8 @@ struct TrackedHand {
     bool valid{};
     float trigger{}, squeeze{}, stickX{}, stickY{};
     bool stickClick{};
+    // How hard its trackpad is pressed down, 0 to 1 (the Index's; 0 without one).
+    float pad{};
 };
 struct EyeFov {
     float left{}, right{}, down{}, up{};
@@ -32,6 +34,9 @@ enum ControllerButton : uint32_t {
     buttonDpadDown = 128,
     buttonDpadLeft = 256,
     buttonDpadRight = 512,
+    // The Index's left trackpad pressed down: the zip to a point, as the
+    // right stick pushed up (index_pads.hpp).
+    buttonPadZip = 1024,
 };
 struct XrFrame {
     Pose head{};

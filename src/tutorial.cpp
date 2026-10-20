@@ -32,7 +32,7 @@ std::string buttonName(char button, ControllerKind kind) {
         case 'Y':
             return "LEFT B BUTTON";
         case 'M':
-            return "LEFT TRACKPAD (PRESS IT DOWN)";
+            return "BOTH TRACKPADS, PRESSED TOGETHER";
         default:
             break;
         }
@@ -67,7 +67,8 @@ std::vector<Step> steps(const Wording& w) {
         {"WEB ZIP",
          {"WITH A WEB HELD, YANK THAT HAND SHARPLY BACK TO ZIP",
           "TOO HARD? RAISE ARM SENSITIVITY IN SETTINGS, SPIDY VR",
-          "OR HOLD THE " + right + " UP: ZIP TO A POINT"},
+          index ? "OR HOLD THE LEFT TRACKPAD DOWN, LET GO: ZIP TO A POINT"
+                : "OR HOLD THE " + right + " UP: ZIP TO A POINT"},
          Goal::zip},
         {"JUMP AND LEAP",
          {"THE " + b('A') + " JUMPS", "HOLD IT ON THE GROUND, THEN LET GO",
@@ -113,9 +114,19 @@ std::vector<Step> steps(const Wording& w) {
          {"HOLD THE " + b('X') + ": A GADGET WHEEL OPENS", "MOVE THAT HAND TO ONE AND LET GO",
           "A FREE HAND FIRES IT WITH ITS " + reelName},
          Goal::gadget},
+        {"SUIT POWER",
+         {"CROSS YOUR ARMS ON YOUR CHEST, HANDS AT YOUR SHOULDERS", "HOLD THEM THERE UNTIL BOTH HANDS TICK",
+          "THEN THROW YOUR ARMS OUT WIDE"},
+         Goal::suit},
+        {"STEALTH WEB TAKEDOWNS",
+         {"SNEAK UP ON, OR PERCH ABOVE, AN ENEMY WHO HAS NOT SEEN YOU",
+          "WHEN THE GAME SHOWS TAKEDOWN, LOOK AT HIM, PRESS THE " + b('Y'),
+          index ? "TO ZIP TO A PERCH: LOOK AT IT, HOLD THE LEFT TRACKPAD, LET GO"
+                : "TO ZIP TO A PERCH: LOOK AT IT, HOLD THE " + right + " UP"},
+         Goal::none},
         {"PROMPTS AND MENUS",
          {"LOOK AT WHAT THE GAME ASKS FOR, PRESS THE " + b('Y'), "TAP THE " + b('X') + ": MAP, SUITS, SKILLS",
-          "TO PAUSE: THE " + b('M')},
+          index ? std::string("TO PAUSE: PRESS BOTH TRACKPADS TOGETHER") : "TO PAUSE: PRESS " + b('M')},
          Goal::none},
         {"YOU ARE READY",
          {"THAT IS EVERYTHING. GO SWING, SPIDEY!", "TO SEE THIS AGAIN, RUN REPLAY SPIDY TUTORIAL",
@@ -229,6 +240,9 @@ Choice Tutorial::update(float seconds, bool active, Pose head, const Fingers& fi
             break;
         case Goal::gadget:
             made = seen.gadget;
+            break;
+        case Goal::suit:
+            made = seen.suit;
             break;
         case Goal::none:
             break;

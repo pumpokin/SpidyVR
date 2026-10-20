@@ -281,6 +281,8 @@ XrAction XrRuntime::actionFor(ControllerInput input) const {
         return reset_;
     case ControllerInput::menu:
         return menu_;
+    case ControllerInput::pad:
+        return pad_;
     case ControllerInput::view:
         return view_;
     case ControllerInput::dpadUp:
@@ -374,6 +376,7 @@ void XrRuntime::createActions() {
     buttonB_ = action("button_b", "Back (menus)", XR_ACTION_TYPE_BOOLEAN_INPUT, false);
     buttonX_ = action("button_x", "X (menus)", XR_ACTION_TYPE_BOOLEAN_INPUT, false);
     menu_ = action("menu", "Pause menu", XR_ACTION_TYPE_BOOLEAN_INPUT, false);
+    pad_ = action("trackpad", "Trackpad press (heal, zip; both: pause)", XR_ACTION_TYPE_FLOAT_INPUT);
     haptic_ = action("haptic", "Web feedback", XR_ACTION_TYPE_VIBRATION_OUTPUT);
     // The Steam Frame's own buttons only where its layout is offered: every
     // other runtime gets the actions it got before.
@@ -482,6 +485,12 @@ XrFrame XrRuntime::input(XrTime time) {
         get.action = squeeze_;
         xr(xrGetActionStateFloat(session_, &get, &f), "Squeeze");
         hand.squeeze = f.isActive ? f.currentState : 0;
+        // The Index's grip is its force: INDEX GRIP makes a lighter squeeze count.
+        if (controllers_[i] == ControllerKind::index)
+            hand.squeeze = std::min(1.f, hand.squeeze * squeezeGain_);
+        get.action = pad_;
+        if (XR_SUCCEEDED(xrGetActionStateFloat(session_, &get, &f)) && f.isActive)
+            hand.pad = std::isfinite(f.currentState) ? f.currentState : 0.f;
         XrActionStateVector2f v{XR_TYPE_ACTION_STATE_VECTOR2F};
         get.action = stick_;
         xr(xrGetActionStateVector2f(session_, &get, &v), "Thumbstick");
@@ -520,6 +529,11 @@ XrFrame XrRuntime::input(XrTime time) {
         for (size_t i = 0; i < dpad_.size(); ++i)
             frame.buttons |= extra(dpad_[i]) ? ways[i] : 0u;
     }
+    // The Index's trackpads: the right one heals (the game's D-pad down), the
+    // left one zips to a point, both together pause.
+    const auto pads = pads_.update(frame.seconds, frame.hands[0].pad, frame.hands[1].pad);
+    frame.buttons |= (pads.heal ? buttonDpadDown : 0u) | (pads.zip ? buttonPadZip : 0u) |
+                     (pads.pause ? buttonMenu : 0u);
     return frame;
 }
 void XrRuntime::haptic(int hand, float strength, float seconds) {

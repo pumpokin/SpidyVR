@@ -15,6 +15,9 @@
 #include "spidy/phone.hpp"
 #include "spidy/controller_layout.hpp"
 #include "spidy/tutorial.hpp"
+#include "spidy/suit_power.hpp"
+#include "spidy/dodge_assist.hpp"
+#include "spidy/index_pads.hpp"
 #include "spidy/web_align.hpp"
 #include "spidy/mirror_camera.hpp"
 #include "spidy/wrist_hud.hpp"
@@ -3331,6 +3334,108 @@ int main() {
         const Quat level=h.update(.011f,rolled,steady);
         check(std::abs(level.rotate({1,0,0}).y)<1e-3f,"no roll");
         check(Follow::angle(Follow{}.update(.011f,b,raw),b)<1e-5f,"RAW is the head");
+    });
+    test("Index trackpads: a light press heals or zips, both together pause and do neither", [] {
+        using namespace index_pads;
+        Pads p;
+        Out o{};
+        for (int i=0;i<20;++i)
+            o=p.update(.011f,0,.3f);
+        check(o.heal && !o.zip && !o.pause,"the right pad pressed lightly heals");
+        o=p.update(.011f,0,0);
+        check(!o.heal,"let go: no more");
+        // Pressed for a moment only: within the chord window it does nothing yet.
+        check(!p.update(.011f,.3f,0).zip,"not at once: the other pad may join");
+        for (int i=0;i<15;++i)
+            o=p.update(.011f,.3f,0);
+        check(o.zip && !o.heal,"the left pad held zips");
+        p.update(.011f,0,0);
+        // Both within the window: a pause, and neither heals nor zips.
+        bool healed=false,zipped=false,paused=false;
+        p.update(.011f,.3f,0);
+        for (int i=0;i<30;++i) {
+            o=p.update(.011f,.3f,.3f);
+            healed|=o.heal;zipped|=o.zip;paused|=o.pause;
+        }
+        check(paused && !healed && !zipped,"both pads: pause only");
+        p.update(.011f,0,0);
+        // A thumb only resting on a pad presses nothing.
+        for (int i=0;i<30;++i)
+            o=p.update(.011f,.04f,.04f);
+        check(!o.heal && !o.zip && !o.pause,"a resting thumb presses nothing");
+        p.press=pressForce(2);
+        for (int i=0;i<30;++i)
+            o=p.update(.011f,0,.3f);
+        check(!o.heal,"FIRM wants a harder press");
+    });
+    test("dodge assist: B at a warning dodges away from him; AUTO dodges red, jumps yellow, leaves blue", [] {
+        using namespace dodge_assist;
+        DodgeAssist d;
+        const Vec3 me{0,0,0};
+        Threat red{true,7,{3,1.7f,0},dodge,true,.6f,.1f};
+        // AIM: B with the stick at rest goes straight away from him (-x).
+        auto o=d.update(.011f,aim,red,me,true,false,false);
+        check(o.aimed && o.away.x<-.99f,"away from the attacker");
+        check(!d.update(.011f,aim,red,me,true,false,true).aimed,"a pushed stick dodges the player's way");
+        float forward{},right{};
+        stickToward(o.away,{0,0,-1},forward,right);
+        near(forward,0);near(right,-1);
+        // AUTO: nothing early, a dodge as the blow comes, once.
+        DodgeAssist a;
+        check(!a.update(.011f,automatic,red,me,false,false,false).dodge,"not early");
+        red.toImpact=.2f;
+        o=a.update(.011f,automatic,red,me,false,false,false);
+        check(o.dodge && o.aimed && a.autoAnswers()==1,"a red warning about to land dodges, away from him");
+        for (int i=0;i<30;++i)
+            o=a.update(.011f,automatic,red,me,false,false,false);
+        check(!o.dodge && a.autoAnswers()==1,"once a warning");
+        Threat yellow{true,8,{0,1.7f,3},jump,true,.1f,.3f};
+        o=a.update(.011f,automatic,yellow,me,false,false,false);
+        check(o.jump && !o.dodge,"a yellow one jumps");
+        for (int i=0;i<30;++i)
+            a.update(.011f,automatic,Threat{},me,false,false,false);
+        Threat blue{true,9,{0,1.7f,-3},counter,true,.1f,.3f};
+        o=a.update(.011f,automatic,blue,me,false,false,false);
+        check(!o.jump && !o.dodge,"a blue one is the player's fist");
+        // A warning the player answered himself is not answered again.
+        DodgeAssist b;
+        Threat late{true,10,{3,1.7f,0},dodge,true,.6f,.1f};
+        b.update(.011f,automatic,late,me,true,false,false);
+        late.toImpact=.1f;
+        check(!b.update(.011f,automatic,late,me,false,false,false).dodge,"his own dodge stands");
+        check(!DodgeAssist{}.update(.011f,off,red,me,true,false,false).aimed,"OFF does nothing");
+    });
+    test("suit power: arms crossed on the chest, then flung out wide", [] {
+        using namespace suit_power;
+        Gesture g;
+        const Pose head{{0,1.7f,0},{}};
+        // Crossed: the left hand by the right shoulder, the right by the left.
+        const Vec3 leftCrossed{.15f,1.35f,-.15f},rightCrossed{-.15f,1.35f,-.15f};
+        bool armed=false;
+        for (int i=0;i<30;++i)
+            armed|=g.update(.011f,head,leftCrossed,rightCrossed,true).armed;
+        check(armed && g.armed(),"held crossed: armed, with a tick");
+        g.update(.011f,head,{-.2f,1.35f,-.3f},{.2f,1.35f,-.3f},true);
+        const auto out=g.update(.011f,head,{-.6f,1.4f,-.2f},{.6f,1.4f,-.2f},true);
+        check(out.fired && !g.armed(),"flung out wide: the suit power");
+        // Out wide without crossing first: nothing.
+        Gesture h;
+        bool fired=false;
+        for (int i=0;i<30;++i)
+            fired|=h.update(.011f,head,{-.6f,1.4f,-.2f},{.6f,1.4f,-.2f},true).fired;
+        check(!fired,"arms out alone do nothing");
+        // Crossed only for an instant (a punch across the body): never armed.
+        Gesture k;
+        k.update(.011f,head,leftCrossed,rightCrossed,true);
+        k.update(.011f,head,{-.6f,1.4f,-.2f},{.6f,1.4f,-.2f},true);
+        check(!k.armed(),"a moment's cross arms nothing");
+        // Armed and then too slow: it lapses.
+        Gesture late;
+        for (int i=0;i<30;++i)
+            late.update(.011f,head,leftCrossed,rightCrossed,true);
+        for (int i=0;i<150;++i)
+            late.update(.011f,head,{0,1.2f,-.3f},{0,1.2f,-.3f},true);
+        check(!late.update(.011f,head,{-.6f,1.4f,-.2f},{.6f,1.4f,-.2f},true).fired,"too late to fling");
     });
     test("virtual travel cannot trigger yank", [] {
         TestWorld w;
@@ -6794,9 +6899,10 @@ int main() {
         auto index=hands("/input/squeeze/force");
         for (const auto& button : Paths{{a,"/user/hand/right/input/a/click"},{y,"/user/hand/left/input/b/click"},
                                         {b,"/user/hand/right/input/b/click"},{x,"/user/hand/left/input/a/click"},
-                                        // The Index has no menu button and no D-pad: its trackpads pressed down.
-                                        {menu,"/user/hand/left/input/trackpad/force"},
-                                        {dpadDown,"/user/hand/right/input/trackpad/force"}})
+                                        // The Index has no menu button and no D-pad: its trackpads, as
+                                        // hard as they are pressed (index_pads.hpp).
+                                        {pad,"/user/hand/left/input/trackpad/force"},
+                                        {pad,"/user/hand/right/input/trackpad/force"}})
             index.push_back(button);
         check(paths(of(ControllerKind::index))==index,"the Index layout changed");
         check(std::string(of(ControllerKind::index).profile)=="/interaction_profiles/valve/index_controller" &&
@@ -9990,8 +10096,8 @@ int main() {
         }
         // The sections (the player, October 19: "sort the options in spidy vr
         // settings ingame into nice sections"), each with a setting in the tab.
-        const std::pair<size_t, const char*> sections[] = {{0, "WEBS"},     {5, "SWINGING"}, {11, "COMFORT"},
-                                                           {15, "DISPLAY"}, {22, "BODY"},    {24, "EXPERIMENTAL"}};
+        const std::pair<size_t, const char*> sections[] = {{0, "WEBS"},     {5, "SWINGING"}, {11, "COMFORT"},  {17, "DISPLAY"},
+                                                           {24, "COMBAT"},  {26, "BODY"},    {28, "EXPERIMENTAL"}};
         check(headings == std::size(sections), "the sections: webs, swinging, comfort, display, body, experimental");
         for (const auto& [at, title] : sections) {
             check(all[at].item == Item::none && std::strcmp(all[at].title, title) == 0, "a section out of place");
@@ -10000,9 +10106,9 @@ int main() {
                 ++next;
             check(next < all.size() && all[next].item != Item::none, "a section with no setting in the tab");
         }
-        check(all[25].item == Item::flips && all[25].choices.empty() && std::strcmp(all[24].title, "EXPERIMENTAL") == 0,
+        check(all[29].item == Item::flips && all[29].choices.empty() && std::strcmp(all[28].title, "EXPERIMENTAL") == 0,
               "the flips: a switch under EXPERIMENTAL");
-        check(all.size() == 27 && all[26].item == Item::flipSpeed && all[26].choices.size() == std::size(flipSpeeds),
+        check(all.size() == 31 && all[30].item == Item::flipSpeed && all[30].choices.size() == std::size(flipSpeeds),
               "the flip speed under the flips, the last row");
         // The wall view has no row of its own any more: it turned only while
         // Spidy held the player on a wall, so it was never a choice of its own
@@ -10012,18 +10118,18 @@ int main() {
         // then "also merge the two options").
         for (const auto& row : all)
             check(row.item != Item::standOnWalls, "the wall view still has a row of its own");
-        check(all[17].item == Item::screenSize && all[19].item == Item::hud && all[19].choices.size() == 4 &&
-                  std::strcmp(all[19].choices[0], "OFF") == 0 && std::strcmp(all[19].choices[3], "LARGE") == 0,
+        check(all[19].item == Item::screenSize && all[21].item == Item::hud && all[21].choices.size() == 4 &&
+                  std::strcmp(all[21].choices[0], "OFF") == 0 && std::strcmp(all[21].choices[3], "LARGE") == 0,
               "the HUD after the game screen's rows: OFF, SMALL, MEDIUM, LARGE");
-        check(all[18].item == Item::screenDepth && std::strcmp(all[18].title, "GAME SCREEN 3D") == 0 &&
-                  all[18].choices.size() == 4 && std::strcmp(all[18].choices[0], "OFF") == 0 &&
-                  std::strcmp(all[18].choices[3], "HIGH") == 0,
+        check(all[20].item == Item::screenDepth && std::strcmp(all[20].title, "GAME SCREEN 3D") == 0 &&
+                  all[20].choices.size() == 4 && std::strcmp(all[20].choices[0], "OFF") == 0 &&
+                  std::strcmp(all[20].choices[3], "HIGH") == 0,
               "the game screen's depth under its size: OFF, LOW, MEDIUM, HIGH");
         // Webs are always physical (the user, October 15: "remove non physical web, no need for it").
         for (const auto& row : all)
             check(std::strcmp(row.title, "PHYSICAL WEBS") != 0, "webs can still be made non-physical");
-        check(all[16].item == Item::view && std::strcmp(all[16].title, "VR VIEW") == 0 && all[16].choices.size() == 2 &&
-                  std::strcmp(all[16].choices[0], "VR") == 0 && std::strcmp(all[16].choices[1], "GAME SCREEN") == 0,
+        check(all[18].item == Item::view && std::strcmp(all[18].title, "VR VIEW") == 0 && all[18].choices.size() == 2 &&
+                  std::strcmp(all[18].choices[0], "VR") == 0 && std::strcmp(all[18].choices[1], "GAME SCREEN") == 0,
               "the view above the game screen's rows: VR, or GAME SCREEN");
         // VR VIEW is on the pause menu's first page, beside RESUME, and no other row is.
         for (const auto& row : all)
@@ -10041,9 +10147,13 @@ int main() {
                   all[9].item == Item::swingAssist && all[9].choices.size() == 4 && all[10].item == Item::webAlign &&
                   all[10].choices.size() == 3 && std::strcmp(all[10].choices[2], "BODY + VIEW") == 0,
               "SWINGING then: arm sensitivity, swing assist, web align");
-        check(all[20].item == Item::recordingView && all[21].item == Item::recordingFov &&
-                  all[21].choices.size() == std::size(recordingFovs),
+        check(all[22].item == Item::recordingView && all[23].item == Item::recordingFov &&
+                  all[23].choices.size() == std::size(recordingFovs),
               "DISPLAY ends with the recording view and its FOV");
+        check(all[15].item == Item::indexGrip && all[16].item == Item::indexPad && all[25].item == Item::dodgeAssist &&
+                  Values{}.indexGrip == 0 && Values{}.indexPad == 0 && Values{}.dodgeAssist == 1 &&
+                  gripGain(0) == 3.f && gripGain(2) == 1.f,
+              "COMFORT ends with the Index's grip and trackpads, light; COMBAT has the dodge assist, aim");
         {
             Values v;
             check(v.armSensitivity == 100 && choice(Item::armSensitivity, v) == 2 && v.swingAssist == 0 &&
@@ -10057,8 +10167,8 @@ int main() {
         }
         check(all[12].item == Item::snapTurn && all[13].item == Item::smoothTurn && all[14].item == Item::haptics,
               "COMFORT: snap and smooth turning, the vibration");
-        check(all[23].item == Item::calibrate && all[23].choices.size() == 2 &&
-                  std::strcmp(all[23].choices[1], "ON RESUME") == 0,
+        check(all[27].item == Item::calibrate && all[27].choices.size() == 2 &&
+                  std::strcmp(all[27].choices[1], "ON RESUME") == 0,
               "the body's calibration: NO, or ON RESUME");
         // Every setting has a row but the wall view, which the launcher's one
         // "Wall running" now carries along with who holds you on the wall.

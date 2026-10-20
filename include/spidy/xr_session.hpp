@@ -1,4 +1,5 @@
 #pragma once
+#include "index_pads.hpp"
 #include "controller_layout.hpp"
 #include "d3d12_renderer.hpp"
 #include "tracking.hpp"
@@ -45,6 +46,15 @@ class XrRuntime {
     // One pulse: 25 ms unless `seconds` says longer (up to half a second: a
     // landed blow's kick).
     void haptic(int hand, float strength, float seconds = .025f);
+    // INDEX GRIP: the Index's grip reads its force times this (1 as it is), so
+    // a lighter squeeze shoots and holds a web. Other controllers as they are.
+    void indexGrip(float gain) {
+        squeezeGain_ = std::isfinite(gain) ? std::clamp(gain, 1.f, 5.f) : 1.f;
+    }
+    // INDEX TRACKPAD PRESS: the force a trackpad press takes (index_pads.hpp).
+    void padPress(float force) {
+        pads_.press = std::isfinite(force) ? std::clamp(force, .05f, .9f) : .15f;
+    }
     // Scales every haptic pulse: 0 none, 1 as asked (the VR settings' controller vibration).
     void hapticStrength(float scale) {
         hapticScale_ = std::isfinite(scale) ? std::clamp(scale, 0.f, 1.f) : 1.f;
@@ -103,7 +113,11 @@ class XrRuntime {
     XrActionSet actionSet_{};
     XrAction aim_{}, grip_{}, trigger_{}, squeeze_{}, stick_{}, stickClick_{}, jump_{}, reset_{}, haptic_{};
     // The other face buttons and the menu button, for the game's menus.
-    XrAction buttonB_{}, buttonX_{}, menu_{};
+    XrAction buttonB_{}, buttonX_{}, menu_{}, pad_{};
+    // The Index's trackpads as heal, zip and pause, and how much of its grip's
+    // force counts (INDEX GRIP).
+    index_pads::Pads pads_;
+    float squeezeGain_ = 1;
     // The Steam Frame's own: its View button and its D-pad (up, down, left,
     // right). None where the runtime does not know that controller.
     XrAction view_{};

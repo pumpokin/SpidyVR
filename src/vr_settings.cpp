@@ -33,6 +33,11 @@ constexpr const char* alignChoices[] = {"OFF", "BODY", "BODY + VIEW"};
 constexpr const char* recordingViewChoices[] = {"RAW EYE", "SMOOTH", "STEADY"};
 constexpr const char* recordingFovChoices[] = {"60\xC2\xB0", "70\xC2\xB0", "80\xC2\xB0",
                                                "90\xC2\xB0", "100\xC2\xB0", "110\xC2\xB0"};
+constexpr const char* lightFirmChoices[] = {"LIGHT", "MEDIUM", "FIRM"};
+constexpr const char* dodgeAssistChoices[] = {"OFF", "AIM", "AUTO"};
+static_assert(std::size(lightFirmChoices) == std::size(indexGrips) &&
+              std::size(lightFirmChoices) == std::size(indexPads) &&
+              std::size(dodgeAssistChoices) == std::size(dodgeAssists));
 static_assert(std::size(armChoices) == std::size(armSensitivities) &&
               std::size(assistChoices) == std::size(swingAssists) && std::size(alignChoices) == std::size(webAligns) &&
               std::size(recordingViewChoices) == std::size(recordingViews) &&
@@ -77,6 +82,12 @@ std::span<const int> steps(Item item) {
         return recordingViews;
     case Item::recordingFov:
         return recordingFovs;
+    case Item::indexGrip:
+        return indexGrips;
+    case Item::indexPad:
+        return indexPads;
+    case Item::dodgeAssist:
+        return dodgeAssists;
     default:
         return {};
     }
@@ -111,6 +122,12 @@ float numberOf(Item item, const Values& v) {
         return static_cast<float>(v.recordingView);
     case Item::recordingFov:
         return static_cast<float>(v.recordingFov);
+    case Item::indexGrip:
+        return static_cast<float>(v.indexGrip);
+    case Item::indexPad:
+        return static_cast<float>(v.indexPad);
+    case Item::dodgeAssist:
+        return static_cast<float>(v.dodgeAssist);
     default:
         return 0;
     }
@@ -155,11 +172,14 @@ Values sanitized(Values v) {
     v.webAlign = std::clamp(v.webAlign, 0, 2);
     v.recordingView = std::clamp(v.recordingView, 0, 2);
     v.recordingFov = std::clamp(v.recordingFov, 40, 120);
+    v.indexGrip = std::clamp(v.indexGrip, 0, 2);
+    v.indexPad = std::clamp(v.indexPad, 0, 2);
+    v.dodgeAssist = std::clamp(v.dodgeAssist, 0, 2);
     return v;
 }
-const std::array<Row, 27>& rows() {
+const std::array<Row, 31>& rows() {
     // The help fits the game's description column beside the rows.
-    static const std::array<Row, 27> all{{
+    static const std::array<Row, 31> all{{
         {Item::none, "WEBS", nullptr, {}},
         {Item::webStyle, "WEB STYLE",
          "Arcade: webs pass lamp posts, signs and cars, and swings stay above the street.", webStyleChoices},
@@ -185,6 +205,10 @@ const std::array<Row, 27>& rows() {
          smoothChoices},
         {Item::haptics, "CONTROLLER VIBRATION", "How strongly webs, grabs and punches buzz in your hands.",
          hapticChoices},
+        {Item::indexGrip, "INDEX GRIP", "Valve Index: how hard you squeeze the handle to shoot and hold a web.",
+         lightFirmChoices},
+        {Item::indexPad, "INDEX TRACKPAD PRESS",
+         "Valve Index: right pad heals, left pad zips, both pause. How hard to press.", lightFirmChoices},
         {Item::none, "DISPLAY", nullptr, {}},
         {Item::view, "VR VIEW", "Play in VR, or the game as it is on a 3D screen, with pad controls.", viewChoices,
          true},
@@ -198,6 +222,9 @@ const std::array<Row, 27>& rows() {
          "What your monitor shows in VR. SMOOTH and STEADY calm head shake.", recordingViewChoices},
         {Item::recordingFov, "RECORDING FOV", "How wide your monitor's view is. Your headset view stays the same.",
          recordingFovChoices},
+        {Item::none, "COMBAT", nullptr, {}},
+        {Item::dodgeAssist, "DODGE ASSIST",
+         "AIM: B at a Spider-Sense dodges away from him. AUTO: dodges red, jumps yellow.", dodgeAssistChoices},
         {Item::none, "BODY", nullptr, {}},
         {Item::calibrate, "CALIBRATE BODY", "Fit Spider-Man to you: pick ON RESUME, then hold both triggers in a T-pose.",
          calibrateChoices},
@@ -275,6 +302,15 @@ bool choose(Item item, int index, Values& v) {
         break;
     case Item::recordingFov:
         v.recordingFov = s[index];
+        break;
+    case Item::indexGrip:
+        v.indexGrip = s[index];
+        break;
+    case Item::indexPad:
+        v.indexPad = s[index];
+        break;
+    case Item::dodgeAssist:
+        v.dodgeAssist = s[index];
         break;
     default:
         return false;

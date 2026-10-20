@@ -22,6 +22,7 @@ struct Events {
     bool webAttached{}; // a web holds in either hand now
     bool reeling{};     // a hand with a web pulls its reel button
     bool zip{}, jump{}, wall{}, shot{}, punch{}, called{}, uppercut{}, slam{}, dodge{}, slow{}, heal{}, gadget{};
+    bool suit{};
 };
 enum class Goal : uint8_t {
     none, // read it, then NEXT
@@ -39,6 +40,7 @@ enum class Goal : uint8_t {
     slow,
     heal,
     gadget,
+    suit,
 };
 // How the buttons are named for the player's controllers and settings.
 struct Wording {

@@ -39,6 +39,8 @@
 #include "spidy/web_pull.hpp"
 #include "spidy/tutorial.hpp"
 #include "spidy/web_align.hpp"
+#include "spidy/dodge_assist.hpp"
+#include "spidy/suit_power.hpp"
 #include "spidy/wrist_hud.hpp"
 #include "spidy/xr_layers.hpp"
 #include "spidy/xr_session.hpp"
@@ -482,7 +484,10 @@ void keepSettings(const vr_settings::Values& v) {
                              "\nswing_assist=" + std::to_string(v.swingAssist) +
                              "\nweb_align=" + std::to_string(v.webAlign) +
                              "\nrecording_view=" + std::to_string(v.recordingView) +
-                             "\nrecording_fov=" + std::to_string(v.recordingFov) + "\n";
+                             "\nrecording_fov=" + std::to_string(v.recordingFov) +
+                             "\nindex_grip=" + std::to_string(v.indexGrip) +
+                             "\nindex_pad=" + std::to_string(v.indexPad) +
+                             "\ndodge_assist=" + std::to_string(v.dodgeAssist) + "\n";
     DWORD written{};
     WriteFile(file, text.data(), static_cast<DWORD>(text.size()), &written, nullptr);
     CloseHandle(file);
@@ -893,11 +898,15 @@ DWORD WINAPI run(void*) {
             values.webAlign = keptSetting(kept, "web_align", values.webAlign);
             values.recordingView = keptSetting(kept, "recording_view", values.recordingView);
             values.recordingFov = keptSetting(kept, "recording_fov", values.recordingFov);
+            values.indexGrip = keptSetting(kept, "index_grip", values.indexGrip);
+            values.indexPad = keptSetting(kept, "index_pad", values.indexPad);
+            values.dodgeAssist = keptSetting(kept, "dodge_assist", values.dodgeAssist);
         }
         values = vr_settings::sanitized(values);
         // What settings.txt holds, so a change writes it once.
         int keptArm = values.armSensitivity, keptAssist = values.swingAssist, keptAlign = values.webAlign,
-            keptView = values.recordingView, keptFov = values.recordingFov;
+            keptView = values.recordingView, keptFov = values.recordingFov, keptGrip = values.indexGrip,
+            keptPad = values.indexPad, keptDodge = values.dodgeAssist;
         // WEB ALIGN: the lean up the web (web_align.hpp).
         web_align::WebAlign webAlign;
         // The recording view's camera (mirror_camera.hpp), and when the image
@@ -1006,6 +1015,16 @@ DWORD WINAPI run(void*) {
             SenseSight sight{};
         };
         std::array<SenseMark, 6> senseMarks{};
+        // DODGE ASSIST (dodge_assist.hpp): the warning that lands soonest this
+        // frame, and the assist that answers it.
+        dodge_assist::Threat senseFirst{};
+        dodge_assist::DodgeAssist dodgeAssist;
+        // The suit power by crossing the arms and flinging them out
+        // (suit_power.hpp), and how long its L3 + R3 is still held.
+        suit_power::Gesture suitGesture;
+        float suitHeld{};
+        uint32_t suitPowers{};
+        uint32_t autoDodgesBefore{};
         uint64_t countersBefore{};
         uint32_t senseShown{}, senseFrames{}, senseSightFrames{}, senseTingles{};
         uint32_t senseBroken{}, senseDodges{};
@@ -1189,6 +1208,8 @@ DWORD WINAPI run(void*) {
         };
         auto applySettings = [&] {
             runtime.hapticStrength(static_cast<float>(values.haptics) / 100);
+            runtime.indexGrip(vr_settings::gripGain(values.indexGrip));
+            runtime.padPress(index_pads::pressForce(values.indexPad));
             rig.snapTurn(static_cast<float>(values.snapTurn) * 3.14159265f / 180);
             rig.smoothTurn(static_cast<float>(values.smoothTurn) * 3.14159265f / 180);
             rig.flips(values.flips);
@@ -1666,7 +1687,11 @@ DWORD WINAPI run(void*) {
                         applySettings();
                         if (values.armSensitivity != keptArm || values.swingAssist != keptAssist ||
                             values.webAlign != keptAlign || values.recordingView != keptView ||
-                            values.recordingFov != keptFov) {
+                            values.recordingFov != keptFov || values.indexGrip != keptGrip ||
+                            values.indexPad != keptPad || values.dodgeAssist != keptDodge) {
+                            keptGrip = values.indexGrip;
+                            keptPad = values.indexPad;
+                            keptDodge = values.dodgeAssist;
                             keptArm = values.armSensitivity;
                             keptAssist = values.swingAssist;
                             keptAlign = values.webAlign;
@@ -2187,7 +2212,20 @@ DWORD WINAPI run(void*) {
                                              senseNow.bytes == expectedSense.bytes && senseNow.status == 2;
                         for (auto& mark : senseMarks)
                             mark.live = false;
+                        senseFirst = {};
                         if (sensing && input.focused) {
+                            // The warning whose blow lands soonest, for DODGE ASSIST.
+                            for (uint32_t i = 0; i < std::min<uint32_t>(senseNow.count, 6); ++i) {
+                                const auto& t = senseNow.threats[i];
+                                if (!t.attacker || !finite(t.head) || !t.answer || t.answer > 3)
+                                    continue;
+                                const float lands = t.timed && std::isfinite(t.toImpact) ? t.toImpact : 9.f;
+                                const float best = senseFirst.live && senseFirst.timed ? senseFirst.toImpact : 9.f;
+                                if (!senseFirst.live || lands < best)
+                                    senseFirst = {true, t.attacker, t.head, t.answer, t.timed != 0,
+                                                  std::isfinite(t.toImpact) ? t.toImpact : 9.f,
+                                                  std::isfinite(t.warned) ? t.warned : 0.f};
+                            }
                             const Pose& eyes = motion.headPose;
                             for (uint32_t i = 0; i < std::min<uint32_t>(senseNow.count, 6); ++i) {
                                 const auto& t = senseNow.threats[i];
@@ -2649,7 +2687,9 @@ DWORD WINAPI run(void*) {
                         walk.heal = push == game_pad::StickPush::Way::down || wristHeal;
                         // Held on into the game's aim mode (its own time slowed), LT stays down alone,
                         // and letting go zips to the point its aim holds (ZipPress).
-                        const bool zipUp = (reaching || inFlight) && push == game_pad::StickPush::Way::up;
+                        // The Index's left trackpad pressed down zips as the stick pushed up does.
+                        const bool zipUp = (reaching || inFlight) && (push == game_pad::StickPush::Way::up ||
+                                                                      (frame.buttons & buttonPadZip));
                         const auto gameTime = game_time::telemetry();
                         const bool slow = gameTime.installed && gameTime.own < game_pad::ZipPress::slowBelow;
                         const auto zipKeys = zipPress.update(frame.seconds, zipUp, sticking, slow);
@@ -2662,6 +2702,48 @@ DWORD WINAPI run(void*) {
                         askingGame = steering && swingState.owned && !calibrationInput &&
                                      (walk.zip || (inFlight && (walk.interact || walk.demand.any())));
                         walk.jump = (keys & swingJumpKey) != 0;
+                        // The suit power: arms crossed over the chest, then flung out.
+                        {
+                            const bool tracked = frame.hands[0].valid && frame.hands[1].valid &&
+                                                 validTrackedPose(frame.head);
+                            const auto suit = suitGesture.update(
+                                frame.seconds, frame.head, frame.hands[0].grip.position,
+                                frame.hands[1].grip.position, tracked && steering && !calibrationInput && !layerOn);
+                            if (suit.armed) {
+                                runtime.haptic(0, .2f, .04f);
+                                runtime.haptic(1, .2f, .04f);
+                            }
+                            if (suit.fired) {
+                                suitHeld = .2f;
+                                ++suitPowers;
+                                tutorialSeen.suit = true;
+                                runtime.haptic(0, .9f, .15f);
+                                runtime.haptic(1, .9f, .15f);
+                                message(3, 0, "Suit power - arms crossed and flung out (the game's L3 + R3)");
+                            }
+                            suitHeld = std::max(0.f, suitHeld - (std::isfinite(frame.seconds) ? frame.seconds : 0.f));
+                            walk.suit = suitHeld > 0;
+                        }
+                        // DODGE ASSIST: B at a warning dodges away from the attacker
+                        // (AIM); a red warning dodges and a yellow one jumps on its own
+                        // as the blow comes (AUTO). On the ground or a perch, where the
+                        // game's dodge and jump are: not while a web carries the player.
+                        {
+                            const bool stickMoved = std::hypot(walk.right, walk.forward) > .2f;
+                            const int assistMode = playing ? values.dodgeAssist : 0;
+                            const auto assist = dodgeAssist.update(frame.seconds, assistMode, senseFirst,
+                                                                   motion.anchor, walk.dodge, walk.jump, stickMoved);
+                            walk.dodge = walk.dodge || assist.dodge;
+                            walk.jump = walk.jump || assist.jump;
+                            if (assist.aimed)
+                                dodge_assist::stickToward(assist.away, {camera[8], camera[9], camera[10]},
+                                                          walk.forward, walk.right);
+                            if (dodgeAssist.autoAnswers() != autoDodgesBefore) {
+                                autoDodgesBefore = dodgeAssist.autoAnswers();
+                                runtime.haptic(0, .3f, .05f);
+                                runtime.haptic(1, .3f, .05f);
+                            }
+                        }
                         // A jump on the game's own crawl - the player's, a web's
                         // takeoff, or the mount's that walks him on from it onto
                         // Spidy's wall - goes out as its RT + A, the only one

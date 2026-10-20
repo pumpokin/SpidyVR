@@ -33,6 +33,8 @@ enum class ControllerInput : uint8_t {
     x,
     y,
     menu,
+    // How hard a trackpad is pressed down (the Index's: index_pads.hpp).
+    pad,
     // The Steam Frame's own (frameOnly).
     view,
     dpadUp,
@@ -107,11 +109,10 @@ inline constexpr ControllerBinding touch[] = {
 };
 // Index: A and B on each hand, the left ones Spidy's X and Y. Their system
 // button is the runtime's, so the trackpads fill in for what the Touch
-// controllers have and the Index lacks: pressing the left trackpad down
-// firmly is the menu button (pause), the right one the game's D-pad down
-// (heal). A thumb only resting on a trackpad presses neither: its force
-// stays near 0 until it is pushed, and the runtime turns that value into a
-// press at its own threshold.
+// controllers have and the Index lacks (index_pads.hpp): the right one
+// pressed down heals, the left one zips to a point, both together pause. Spidy
+// reads how hard each is pressed and takes a light press: a thumb resting on
+// one presses nothing, its force near 0.
 inline constexpr ControllerBinding index[] = {
     {aim, "/user/hand/left/input/aim/pose"},
     {grip, "/user/hand/left/input/grip/pose"},
@@ -131,8 +132,8 @@ inline constexpr ControllerBinding index[] = {
     {y, "/user/hand/left/input/b/click"},
     {b, "/user/hand/right/input/b/click"},
     {x, "/user/hand/left/input/a/click"},
-    {menu, "/user/hand/left/input/trackpad/force"},
-    {dpadDown, "/user/hand/right/input/trackpad/force"},
+    {pad, "/user/hand/left/input/trackpad/force"},
+    {pad, "/user/hand/right/input/trackpad/force"},
 };
 // Steam Frame: A, B, X, Y and Menu on the right, the D-pad and View on the
 // left. Its bumpers have no name the sources agree on (Valve's page says
