@@ -126,6 +126,8 @@ std::atomic<int64_t> mirrorDue{};
 // (keepShownEye; COPY_SOURCE between uses, submission lock), and when it was
 // copied. shownWanted: the window has drawn since, so the next one is copied.
 ComPtr<ID3D12Resource> shownEye;
+// The recording view of the image in shownEye (submission lock).
+MirrorView shownView{};
 uint64_t shownMs{};
 bool shownFailed{};
 std::atomic<bool> shownWanted{true};
@@ -664,13 +666,14 @@ bool prepareMirror(DXGI_FORMAT format) {
     const char* shader = R"(
 Texture2D source : register(t0);
 SamplerState scaled : register(s0);
-cbuffer Part : register(b0) { float2 targetPixel; float2 offset; float2 scale; float2 unused; };
+cbuffer Part : register(b0) { float2 targetPixel; float2 centre; float2 axisX; float2 axisY; };
 float4 vs(uint id : SV_VertexID) : SV_POSITION {
     const float2 corner = float2((id << 1) & 2, id & 2);
     return float4(corner * float2(2, -2) + float2(-1, 1), 0, 1);
 }
 float4 ps(float4 position : SV_POSITION) : SV_TARGET {
-    return float4(source.SampleLevel(scaled, offset + position.xy * targetPixel * scale, 0).rgb, 1);
+    const float2 at = position.xy * targetPixel * 2 - 1;
+    return float4(source.SampleLevel(scaled, centre + at.x * axisX + at.y * axisY, 0).rgb, 1);
 }
 )";
     ComPtr<ID3DBlob> vs, ps, error;
@@ -758,12 +761,19 @@ void mirrorEye(IDXGISwapChain* swapchain) {
                        D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE};
     auto* list = slot->list.Get();
     originalBarrier(list, 2, b);
-    // The part of the eye with the window's shape, about its middle.
+    // The part of the eye with the window's shape: about its middle (RAW, or
+    // the game's own image), or what the recording camera sees of the image
+    // the headset showed (mirror_camera.hpp).
     const float window = static_cast<float>(desc.Width) / static_cast<float>(desc.Height);
     const float image = static_cast<float>(width) / static_cast<float>(height);
-    const float across = window < image ? window / image : 1, down = window < image ? 1 : image / window;
+    mirror_camera::Part p = mirror_camera::rawPart(image, window);
+    if (shown && shownView.mode != mirror_camera::raw) {
+        mirror_camera::Part seen;
+        if (mirror_camera::part(shownView.relative, shownView.tangents, shownView.halfWidth, window, seen))
+            p = seen;
+    }
     const float part[8] = {1.f / static_cast<float>(desc.Width), 1.f / static_cast<float>(desc.Height),
-                           (1 - across) / 2, (1 - down) / 2, across, down, 0, 0};
+                           p.centre[0], p.centre[1], p.axisX[0], p.axisX[1], p.axisY[0], p.axisY[1]};
     list->SetPipelineState(mirrorPipeline.state.Get());
     list->SetGraphicsRootSignature(mirrorPipeline.root.Get());
     ID3D12DescriptorHeap* heaps[] = {mirrorPipeline.source.Get()};
@@ -1120,7 +1130,7 @@ bool copyLatest(ID3D12Resource* left, ID3D12Resource* right, uint64_t& serial, u
     publish();
     return true;
 }
-void keepShownEye(ID3D12Resource* left) {
+void keepShownEye(ID3D12Resource* left, const MirrorView* view) {
     if (!left || !mirrorWanted || screenWanted || !shownWanted)
         return;
     std::lock_guard submitLock(submission);
@@ -1149,6 +1159,7 @@ void keepShownEye(ID3D12Resource* left) {
                    originalBarrier, D3D12_RESOURCE_STATE_COPY_SOURCE);
     if (!submitCommands(*slot))
         return;
+    shownView = view ? *view : MirrorView{};
     shownMs = GetTickCount64();
     shownWanted = false;
 }

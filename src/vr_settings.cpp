@@ -27,6 +27,16 @@ constexpr const char* hudChoices[] = {"OFF", "SMALL", "MEDIUM", "LARGE"};
 constexpr const char* flipSpeedChoices[] = {"90\xC2\xB0/S",  "120\xC2\xB0/S", "150\xC2\xB0/S", "180\xC2\xB0/S",
                                             "240\xC2\xB0/S", "300\xC2\xB0/S", "360\xC2\xB0/S", "480\xC2\xB0/S"};
 constexpr const char* depthChoices[] = {"OFF", "LOW", "MEDIUM", "HIGH"};
+constexpr const char* armChoices[] = {"50%", "75%", "100%", "125%", "150%", "200%", "300%"};
+constexpr const char* assistChoices[] = {"OFF", "LOW", "MEDIUM", "HIGH"};
+constexpr const char* alignChoices[] = {"OFF", "BODY", "BODY + VIEW"};
+constexpr const char* recordingViewChoices[] = {"RAW EYE", "SMOOTH", "STEADY"};
+constexpr const char* recordingFovChoices[] = {"60\xC2\xB0", "70\xC2\xB0", "80\xC2\xB0",
+                                               "90\xC2\xB0", "100\xC2\xB0", "110\xC2\xB0"};
+static_assert(std::size(armChoices) == std::size(armSensitivities) &&
+              std::size(assistChoices) == std::size(swingAssists) && std::size(alignChoices) == std::size(webAligns) &&
+              std::size(recordingViewChoices) == std::size(recordingViews) &&
+              std::size(recordingFovChoices) == std::size(recordingFovs));
 constexpr int screenSizes[] = {0, 1, 2};
 constexpr int hudSizes[] = {0, 1, 2, 3};
 constexpr int depthSteps[] = {0, 1, 2, 3};
@@ -57,6 +67,16 @@ std::span<const int> steps(Item item) {
         return flipSpeeds;
     case Item::screenDepth:
         return depthSteps;
+    case Item::armSensitivity:
+        return armSensitivities;
+    case Item::swingAssist:
+        return swingAssists;
+    case Item::webAlign:
+        return webAligns;
+    case Item::recordingView:
+        return recordingViews;
+    case Item::recordingFov:
+        return recordingFovs;
     default:
         return {};
     }
@@ -81,6 +101,16 @@ float numberOf(Item item, const Values& v) {
         return static_cast<float>(v.flipSpeed);
     case Item::screenDepth:
         return static_cast<float>(v.screenDepth);
+    case Item::armSensitivity:
+        return static_cast<float>(v.armSensitivity);
+    case Item::swingAssist:
+        return static_cast<float>(v.swingAssist);
+    case Item::webAlign:
+        return static_cast<float>(v.webAlign);
+    case Item::recordingView:
+        return static_cast<float>(v.recordingView);
+    case Item::recordingFov:
+        return static_cast<float>(v.recordingFov);
     default:
         return 0;
     }
@@ -120,11 +150,16 @@ Values sanitized(Values v) {
     v.hud = std::clamp(v.hud, 0, 3);
     v.flipSpeed = std::clamp(v.flipSpeed, 90, 480);
     v.screenDepth = std::clamp(v.screenDepth, 0, 3);
+    v.armSensitivity = std::clamp(v.armSensitivity, 25, 400);
+    v.swingAssist = std::clamp(v.swingAssist, 0, 3);
+    v.webAlign = std::clamp(v.webAlign, 0, 2);
+    v.recordingView = std::clamp(v.recordingView, 0, 2);
+    v.recordingFov = std::clamp(v.recordingFov, 40, 120);
     return v;
 }
-const std::array<Row, 22>& rows() {
+const std::array<Row, 27>& rows() {
     // The help fits the game's description column beside the rows.
-    static const std::array<Row, 22> all{{
+    static const std::array<Row, 27> all{{
         {Item::none, "WEBS", nullptr, {}},
         {Item::webStyle, "WEB STYLE",
          "Arcade: webs pass lamp posts, signs and cars, and swings stay above the street.", webStyleChoices},
@@ -137,6 +172,12 @@ const std::array<Row, 22>& rows() {
         {Item::swingSpeed, "SWING SPEED LIMIT", "How fast a swing can carry you.", swingChoices},
         {Item::weight, "WEIGHT", "How heavy you are while swinging and after letting go. 100% is real gravity.",
          weightChoices},
+        {Item::armSensitivity, "ARM SENSITIVITY",
+         "Higher: a smaller arm pull swings you along a web, and a gentler yank zips.", armChoices},
+        {Item::swingAssist, "SWING ASSIST",
+         "Keeps a swing going where you look instead of into the web's building.", assistChoices},
+        {Item::webAlign, "WEB ALIGN",
+         "Lean up the web as you swing. BODY + VIEW tilts your view too (intense).", alignChoices},
         {Item::none, "COMFORT", nullptr, {}},
         {Item::snapTurn, "SNAP TURN", "How far a flick of the right stick turns you. Off: no snap turning.",
          snapChoices},
@@ -153,6 +194,10 @@ const std::array<Row, 22>& rows() {
          "Cutscenes and VIEW: GAME SCREEN get depth. Higher brings them nearer. Off: flat.",
          depthChoices},
         {Item::hud, "HUD", "How large the game's HUD shows in front of you. Off: no HUD in VR.", hudChoices},
+        {Item::recordingView, "RECORDING VIEW",
+         "What your monitor shows in VR. SMOOTH and STEADY calm head shake.", recordingViewChoices},
+        {Item::recordingFov, "RECORDING FOV", "How wide your monitor's view is. Your headset view stays the same.",
+         recordingFovChoices},
         {Item::none, "BODY", nullptr, {}},
         {Item::calibrate, "CALIBRATE BODY", "Fit Spider-Man to you: pick ON RESUME, then hold both triggers in a T-pose.",
          calibrateChoices},
@@ -215,6 +260,21 @@ bool choose(Item item, int index, Values& v) {
         break;
     case Item::screenDepth:
         v.screenDepth = s[index];
+        break;
+    case Item::armSensitivity:
+        v.armSensitivity = s[index];
+        break;
+    case Item::swingAssist:
+        v.swingAssist = s[index];
+        break;
+    case Item::webAlign:
+        v.webAlign = s[index];
+        break;
+    case Item::recordingView:
+        v.recordingView = s[index];
+        break;
+    case Item::recordingFov:
+        v.recordingFov = s[index];
         break;
     default:
         return false;

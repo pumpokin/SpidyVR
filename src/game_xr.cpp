@@ -38,6 +38,7 @@
 #include "spidy/vr_settings.hpp"
 #include "spidy/web_pull.hpp"
 #include "spidy/tutorial.hpp"
+#include "spidy/web_align.hpp"
 #include "spidy/wrist_hud.hpp"
 #include "spidy/xr_layers.hpp"
 #include "spidy/xr_session.hpp"
@@ -45,6 +46,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <mutex>
 #include <stdexcept>
@@ -433,6 +435,57 @@ std::wstring tutorialPath() {
     std::wstring path = std::wstring(folder) + L"\\Spidy";
     CreateDirectoryW(path.c_str(), nullptr);
     return path + L"\\tutorial.txt";
+}
+// The settings this build adds (ARM SENSITIVITY, SWING ASSIST, WEB ALIGN,
+// RECORDING VIEW, RECORDING FOV), kept between sessions beside the tutorial's
+// answer: the launcher does not carry them. %LOCALAPPDATA%\Spidy\settings.txt,
+// a line "name=number" each.
+std::wstring settingsPath() {
+    const auto tutorial = tutorialPath();
+    if (tutorial.empty())
+        return {};
+    return tutorial.substr(0, tutorial.find_last_of(L'\\') + 1) + L"settings.txt";
+}
+std::string readSettings() {
+    const auto path = settingsPath();
+    if (path.empty())
+        return {};
+    const HANDLE file = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+                                    FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE)
+        return {};
+    char text[1024]{};
+    DWORD got{};
+    ReadFile(file, text, sizeof(text) - 1, &got, nullptr);
+    CloseHandle(file);
+    return text;
+}
+// The number kept for `name`, or `fallback`.
+int keptSetting(const std::string& text, const char* name, int fallback) {
+    const std::string key = std::string(name) + "=";
+    for (size_t at = 0; at < text.size();) {
+        const size_t end = std::min(text.find('\n', at), text.size());
+        if (text.compare(at, key.size(), key) == 0)
+            return std::atoi(text.c_str() + at + key.size());
+        at = end + 1;
+    }
+    return fallback;
+}
+void keepSettings(const vr_settings::Values& v) {
+    const auto path = settingsPath();
+    if (path.empty())
+        return;
+    const HANDLE file = CreateFileW(path.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE)
+        return;
+    const std::string text = "arm_sensitivity=" + std::to_string(v.armSensitivity) +
+                             "\nswing_assist=" + std::to_string(v.swingAssist) +
+                             "\nweb_align=" + std::to_string(v.webAlign) +
+                             "\nrecording_view=" + std::to_string(v.recordingView) +
+                             "\nrecording_fov=" + std::to_string(v.recordingFov) + "\n";
+    DWORD written{};
+    WriteFile(file, text.data(), static_cast<DWORD>(text.size()), &written, nullptr);
+    CloseHandle(file);
 }
 bool tutorialAnswered() {
     const auto path = tutorialPath();
@@ -833,7 +886,24 @@ DWORD WINAPI run(void*) {
         values.hud = static_cast<int>(config.hud);
         values.flipSpeed = static_cast<int>(config.flipSpeed);
         values.screenDepth = static_cast<int>(config.screenDepth);
+        {
+            const auto kept = readSettings();
+            values.armSensitivity = keptSetting(kept, "arm_sensitivity", values.armSensitivity);
+            values.swingAssist = keptSetting(kept, "swing_assist", values.swingAssist);
+            values.webAlign = keptSetting(kept, "web_align", values.webAlign);
+            values.recordingView = keptSetting(kept, "recording_view", values.recordingView);
+            values.recordingFov = keptSetting(kept, "recording_fov", values.recordingFov);
+        }
         values = vr_settings::sanitized(values);
+        // What settings.txt holds, so a change writes it once.
+        int keptArm = values.armSensitivity, keptAssist = values.swingAssist, keptAlign = values.webAlign,
+            keptView = values.recordingView, keptFov = values.recordingFov;
+        // WEB ALIGN: the lean up the web (web_align.hpp).
+        web_align::WebAlign webAlign;
+        // The recording view's camera (mirror_camera.hpp), and when the image
+        // it last followed was shown (ns).
+        mirror_camera::Follow mirrorFollow;
+        int64_t mirrorShown{};
         game_menu::publish(values);
         uint32_t settingChanges{};
         // aims are each hand's latest preview.
@@ -1102,6 +1172,8 @@ DWORD WINAPI run(void*) {
             s.gravity = vr_settings::gravity(values.weight);
             s.walls = !(config.options & 16384);
             s.arcade = values.arcadeWebs;
+            s.armSensitivity = vr_settings::armFactor(values.armSensitivity);
+            s.swingAssist = vr_settings::assistRate(values.swingAssist);
             sentSwingSettings = s;
             swingSettingsSent = true;
             // A hand-over owns the walls while it lasts; the player's own
@@ -1496,6 +1568,17 @@ DWORD WINAPI run(void*) {
                                     rig.surfaceFound({hit.position, n});
                             }
                     }
+                    // WEB ALIGN: from the webs the swing held last frame. In the
+                    // air only, off the swing's walls and the game's crawl.
+                    {
+                        const bool inAir = swingState.status && !swingState.grounded && !swingState.wall;
+                        const bool view = values.webAlign == web_align::bodyAndView;
+                        webAlign.update(frame.seconds, inAir && values.webAlign != web_align::off,
+                                        {swingState.webs[0].attached != 0, swingState.webs[1].attached != 0},
+                                        {swingState.webs[0].anchor, swingState.webs[1].anchor}, swingState.position,
+                                        view);
+                        rig.webAlign(view ? webAlign.tilt() : Quat{});
+                    }
                     motion = rig.update(controller, feet, {camera[8], camera[9], camera[10]}, gameplay,
                                         swingState.owned ? Vec3{0, 1, 0} : heroUp,
                                         game_swing::airborne(swingState, now.QuadPart, frequency.QuadPart), hold,
@@ -1581,6 +1664,16 @@ DWORD WINAPI run(void*) {
                     if (game_menu::take(values)) {
                         ++settingChanges;
                         applySettings();
+                        if (values.armSensitivity != keptArm || values.swingAssist != keptAssist ||
+                            values.webAlign != keptAlign || values.recordingView != keptView ||
+                            values.recordingFov != keptFov) {
+                            keptArm = values.armSensitivity;
+                            keptAssist = values.swingAssist;
+                            keptAlign = values.webAlign;
+                            keptView = values.recordingView;
+                            keptFov = values.recordingFov;
+                            keepSettings(values);
+                        }
                     }
                     game_menu::publish(values);
                     const uint32_t gate =
@@ -3047,6 +3140,14 @@ DWORD WINAPI run(void*) {
                             const Quat yaw = Quat::yaw(motion.swing.trackingYaw);
                             pose.tilt = yaw * tilt * yaw.conjugate();
                         }
+                        // WEB ALIGN: BODY leans the body up the web about the eyes,
+                        // the view upright (BODY + VIEW leans the view, which the
+                        // tilt above already carries).
+                        if (values.webAlign == web_align::body && !motion.standing) {
+                            const Quat lean = webAlign.tilt();
+                            if (lean.x != 0 || lean.y != 0 || lean.z != 0)
+                                pose.tilt = lean * pose.tilt;
+                        }
                         native_body::submit(pose);
                     }
                     // Keep publishing tracking while the engine renders earlier
@@ -3612,7 +3713,27 @@ DWORD WINAPI run(void*) {
                                         .count();
                         // The game's window mirrors the left eye as it is now, the
                         // drawings above on it; copied only when the window took the last.
-                        native_gpu::keepShownEye(targets[0].texture);
+                        {
+                            // Through the recording view's camera: it follows the
+                            // eye the image was drawn for, smoothly.
+                            const auto& o = targets[0].view.pose.orientation;
+                            const auto& lens = targets[0].view.fov;
+                            const Quat eye{o.x, o.y, o.z, o.w};
+                            const float seconds =
+                                mirrorShown && shown > mirrorShown
+                                    ? static_cast<float>(static_cast<double>(shown - mirrorShown) * 1e-9)
+                                    : 0.f;
+                            mirrorShown = shown;
+                            native_gpu::MirrorView mirrorView;
+                            mirrorView.mode = values.recordingView;
+                            mirrorView.relative =
+                                eye.conjugate() * mirrorFollow.update(seconds, eye, values.recordingView);
+                            mirrorView.tangents = {std::tan(lens.angleLeft), std::tan(lens.angleRight),
+                                                   std::tan(lens.angleUp), std::tan(lens.angleDown)};
+                            mirrorView.halfWidth =
+                                std::tan(static_cast<float>(values.recordingFov) * 3.14159265f / 360);
+                            native_gpu::keepShownEye(targets[0].texture, &mirrorView);
+                        }
                         if (webGap >= 0 && imageGeneration != gapGeneration) {
                             native_eyes::reportWebGap(webGap);
                             gapGeneration = imageGeneration;

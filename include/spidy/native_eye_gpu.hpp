@@ -1,4 +1,5 @@
 #pragma once
+#include "mirror_camera.hpp"
 #include <cstdint>
 #include <d3d12.h>
 #include <wrl/client.h>
@@ -71,7 +72,16 @@ uint32_t mirrored();
 // shown the last one: one eye-sized copy on the game's queue for each picture
 // the window gets, none while it mirrors nothing. mirroredShown() counts the
 // presents that drew such a copy (diagnostic).
-void keepShownEye(ID3D12Resource* left);
+// The recording view the window shows that image through (mirror_camera.hpp):
+// its mode, the camera's orientation in the image's eye axes, the image's
+// lens, and the width wanted (tangent of half of it).
+struct MirrorView {
+    int mode{};
+    Quat relative{};
+    mirror_camera::Tangents tangents{};
+    float halfWidth = 1;
+};
+void keepShownEye(ID3D12Resource* left, const MirrorView* view = nullptr);
 uint32_t mirroredShown();
 // The newest copied frame, if one was copied within maxAgeMs.
 bool latestScreen(Screen& out, uint64_t maxAgeMs);

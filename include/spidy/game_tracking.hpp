@@ -304,6 +304,13 @@ class GameTrackingRig {
     const HeadClearance& clearance() const {
         return clearance_;
     }
+    // WEB ALIGN: BODY + VIEW (web_align.hpp): the view leans with the web by
+    // this tilt (world axes; the identity: upright), about the head where the
+    // lean began, while no flip turns the player and no surface holds him.
+    // The next update takes it.
+    void webAlign(Quat worldTilt) {
+        align_ = worldTilt;
+    }
     void reset();
 
   private:
@@ -324,6 +331,10 @@ class GameTrackingRig {
     Quat surfaceTurn_{};
     Vec3 surfaceShift_{};
     bool standing_{}, standOnWalls_ = true;
+    // The web align tilt the view takes (webAlign), and whether the view
+    // leaned with it last frame (its pivot then stays where the lean began).
+    Quat align_{};
+    bool aligned_{};
     float headroom_{};
     Vec3 headDrop_{};
     HeadClearance clearance_{};

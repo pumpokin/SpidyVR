@@ -15,6 +15,8 @@
 #include "spidy/phone.hpp"
 #include "spidy/controller_layout.hpp"
 #include "spidy/tutorial.hpp"
+#include "spidy/web_align.hpp"
+#include "spidy/mirror_camera.hpp"
 #include "spidy/wrist_hud.hpp"
 #include "spidy/game_swing.hpp"
 #include "spidy/native_movement.hpp"
@@ -3190,6 +3192,145 @@ int main() {
             s.update(.01f, in, w);
         }
         near(length(s.body().velocity), 0);
+    });
+    test("arm sensitivity: a gentler pull zips when higher, a sharp one does not when lower", [] {
+        // A steady pull at 0.6 m/s: no zip as the arm moved, one at 300%.
+        const auto zipsAt=[](float arm,float step) {
+            TestWorld w;
+            auto config=inert();
+            config.armSensitivity=arm;
+            Swing s(config);
+            auto in = aimed();
+            s.update(.01f, in, w);
+            int zips = 0;
+            for (int i = 0; i < 20; ++i) {
+                in.hands[0].gripRelativeToHead.y -= step;
+                s.update(.01f, in, w);
+                for (auto e : s.events())
+                    zips += e.kind == EventKind::Zip;
+            }
+            return zips;
+        };
+        check(zipsAt(1,.006f)==0,"a gentle pull zips as the arm moved");
+        check(zipsAt(3,.006f)==1,"a gentle pull does not zip at 300%");
+        check(zipsAt(1,.03f)==1 && zipsAt(.4f,.03f)==0,"a sharp yank zips at 100% and not at 40%");
+        Swing s(inert());
+        bool refused=false;
+        try { s.setArmSensitivity(0); } catch (const std::invalid_argument&) { refused=true; }
+        check(refused,"no arm sensitivity of 0");
+        s.setArmSensitivity(2);
+    });
+    test("swing assist: a web off to the side swings the body on ahead, its speed kept", [] {
+        // Flying ahead (-z) at 15 m/s, a web shot up to the right: without the
+        // assist the rope swings the body round toward the anchor's side.
+        const auto drift=[](float assist,Vec3& velocity) {
+            TestWorld w;
+            w.anchor={10,20,-6};
+            SwingConfig config;
+            config.swingAssist=assist;
+            Swing s(config);
+            s.reset({{0,5,0},{0,0,-15},false});
+            auto in=aimedAt({0,5,0},w.anchor);
+            in.look={0,0,-1};
+            for (int i=0;i<90;++i)
+                s.update(1.f/90,in,w);
+            check(s.webs()[0].attached,"the web holds");
+            velocity=s.body().velocity;
+            return s.body().position.x;
+        };
+        Vec3 plain{},assisted{};
+        const float free=drift(0,plain),kept=drift(6,assisted);
+        check(free>1,"without the assist the web pulls the body toward its side");
+        check(kept<free*.5f,"the assist keeps it going straighter");
+        check(-assisted.z>std::abs(assisted.x)*2,"the assisted body heads on ahead");
+        Swing s;
+        bool refused=false;
+        try { s.setSwingAssist(-1); } catch (const std::invalid_argument&) { refused=true; }
+        check(refused && length(s.assistHeading())==0,"no negative assist, no heading before a swing");
+    });
+    test("web align: the body leans up the web, back upright without it", [] {
+        using namespace web_align;
+        WebAlign a;
+        const std::array<bool,2> one{true,false};
+        // A web up and ahead (-z) of the body, 45 degrees from straight up.
+        const std::array<Vec3,2> anchors{Vec3{0,10,-10},Vec3{}};
+        for (int i=0;i<200;++i)
+            a.update(.01f,true,one,anchors,{0,0,0},false);
+        const Vec3 up=a.tilt().rotate({0,1,0});
+        check(std::abs(a.angle()-.7854f)<.02f,"leans the whole 45 degrees");
+        check(up.z<-.6f && up.y>.6f,"its up points along the web");
+        for (int i=0;i<200;++i)
+            a.update(.01f,true,one,anchors,{0,0,0},true);
+        check(a.angle()<=a.maxView+.01f,"the view leans no more than maxView");
+        for (int i=0;i<300;++i)
+            a.update(.01f,false,one,anchors,{0,0,0},false);
+        const Quat q=a.tilt();
+        check(q.x==0 && q.y==0 && q.z==0,"let go: upright, exactly");
+        // A web shot level or down leans nothing.
+        WebAlign b;
+        for (int i=0;i<100;++i)
+            b.update(.01f,true,one,{Vec3{0,.2f,-10},Vec3{}},{0,0,0},false);
+        check(b.angle()<1e-3f,"no lean toward a web below the body");
+    });
+    test("web align with the view: the rig leans about the head, which stays put", [] {
+        GameTrackingRig rig;
+        auto f=trackedFrame();
+        f.seconds=1.f/90;
+        const auto first=rig.update(f,{0,0,0},{0,0,-1},true);
+        const Quat lean=Quat::around({1,0,0},.5f);
+        rig.webAlign(lean);
+        GameMotionFrame m{};
+        for (int i=0;i<5;++i) {
+            ++f.predictedDisplayTime;
+            m=rig.update(f,{0,0,0},{0,0,-1},true);
+        }
+        check(length(m.headPose.position-first.headPose.position)<1e-3f,"the head stays where it was");
+        const Vec3 up=m.headPose.orientation.rotate({0,1,0});
+        check(std::abs(std::acos(std::clamp(up.y,-1.f,1.f))-.5f)<.02f,"the view leans by the web's tilt");
+        rig.webAlign({});
+        ++f.predictedDisplayTime;
+        m=rig.update(f,{0,0,0},{0,0,-1},true);
+        check(m.headPose.orientation.rotate({0,1,0}).y>.999f,"upright again without it");
+    });
+    test("recording view: raw is the middle as before; smooth trails the head and stays in the image", [] {
+        using namespace mirror_camera;
+        // An Index-like lens: about 105 degrees across, a little wider inward.
+        const Tangents lens{-1.39f,1.25f,1.33f,-1.40f};
+        const auto middle=rawPart(1.f,16.f/9);
+        near(middle.centre[0],.5f);near(middle.axisX[0],.5f);near(middle.axisY[1],.5f*9/16);
+        // Looking where the eye looks: centred on straight ahead, 90 degrees across.
+        Part p;
+        check(part({},lens,1,16.f/9,p),"a part straight ahead");
+        float u{},v{};
+        project({0,0,-1},lens,u,v);
+        near(p.centre[0],u);near(p.centre[1],v);
+        near(p.axisX[0],1/(lens.right-lens.left));
+        // Asked wider than the image: held inside it.
+        check(part({},lens,5,16.f/9,p) && p.centre[0]-p.axisX[0]>=-1e-4f && p.centre[0]+p.axisX[0]<=1+1e-4f,
+              "a view too wide is held inside the image");
+        // A camera turned 10 degrees left of the eye samples left of centre.
+        check(part(Quat::yaw(.1745f),lens,1,16.f/9,p) && p.centre[0]<u-.03f,"turned left, it samples left");
+        // The camera follows a head that jerks 20 degrees: not at once, but soon.
+        Follow f;
+        const Quat a{},b=Quat::yaw(.35f);
+        f.update(.011f,a,smooth);
+        const Quat moved=f.update(.011f,b,smooth);
+        check(Follow::angle(moved,b)>.25f,"one frame later it has not jumped with the head");
+        Quat later{};
+        for (int i=0;i<60;++i)
+            later=f.update(.011f,b,smooth);
+        check(Follow::angle(later,b)<.01f,"in well under a second it is there");
+        // It never lags further than the image allows.
+        Follow g;
+        g.update(.011f,a,smooth);
+        check(Follow::angle(g.update(.011f,Quat::yaw(1.2f),smooth),Quat::yaw(1.2f))<=g.smoothLag+1e-3f,
+              "a fast turn drags it along");
+        // STEADY holds the horizon level: a rolled head, an upright camera.
+        Follow h;
+        const Quat rolled=Quat::around({0,0,1},.4f);
+        const Quat level=h.update(.011f,rolled,steady);
+        check(std::abs(level.rotate({1,0,0}).y)<1e-3f,"no roll");
+        check(Follow::angle(Follow{}.update(.011f,b,raw),b)<1e-5f,"RAW is the head");
     });
     test("virtual travel cannot trigger yank", [] {
         TestWorld w;
@@ -9849,8 +9990,8 @@ int main() {
         }
         // The sections (the player, October 19: "sort the options in spidy vr
         // settings ingame into nice sections"), each with a setting in the tab.
-        const std::pair<size_t, const char*> sections[] = {{0, "WEBS"},     {5, "SWINGING"}, {8, "COMFORT"},
-                                                           {12, "DISPLAY"}, {17, "BODY"},    {19, "EXPERIMENTAL"}};
+        const std::pair<size_t, const char*> sections[] = {{0, "WEBS"},     {5, "SWINGING"}, {11, "COMFORT"},
+                                                           {15, "DISPLAY"}, {22, "BODY"},    {24, "EXPERIMENTAL"}};
         check(headings == std::size(sections), "the sections: webs, swinging, comfort, display, body, experimental");
         for (const auto& [at, title] : sections) {
             check(all[at].item == Item::none && std::strcmp(all[at].title, title) == 0, "a section out of place");
@@ -9859,9 +10000,9 @@ int main() {
                 ++next;
             check(next < all.size() && all[next].item != Item::none, "a section with no setting in the tab");
         }
-        check(all[20].item == Item::flips && all[20].choices.empty() && std::strcmp(all[19].title, "EXPERIMENTAL") == 0,
+        check(all[25].item == Item::flips && all[25].choices.empty() && std::strcmp(all[24].title, "EXPERIMENTAL") == 0,
               "the flips: a switch under EXPERIMENTAL");
-        check(all.size() == 22 && all[21].item == Item::flipSpeed && all[21].choices.size() == std::size(flipSpeeds),
+        check(all.size() == 27 && all[26].item == Item::flipSpeed && all[26].choices.size() == std::size(flipSpeeds),
               "the flip speed under the flips, the last row");
         // The wall view has no row of its own any more: it turned only while
         // Spidy held the player on a wall, so it was never a choice of its own
@@ -9871,18 +10012,18 @@ int main() {
         // then "also merge the two options").
         for (const auto& row : all)
             check(row.item != Item::standOnWalls, "the wall view still has a row of its own");
-        check(all[14].item == Item::screenSize && all[16].item == Item::hud && all[16].choices.size() == 4 &&
-                  std::strcmp(all[16].choices[0], "OFF") == 0 && std::strcmp(all[16].choices[3], "LARGE") == 0,
+        check(all[17].item == Item::screenSize && all[19].item == Item::hud && all[19].choices.size() == 4 &&
+                  std::strcmp(all[19].choices[0], "OFF") == 0 && std::strcmp(all[19].choices[3], "LARGE") == 0,
               "the HUD after the game screen's rows: OFF, SMALL, MEDIUM, LARGE");
-        check(all[15].item == Item::screenDepth && std::strcmp(all[15].title, "GAME SCREEN 3D") == 0 &&
-                  all[15].choices.size() == 4 && std::strcmp(all[15].choices[0], "OFF") == 0 &&
-                  std::strcmp(all[15].choices[3], "HIGH") == 0,
+        check(all[18].item == Item::screenDepth && std::strcmp(all[18].title, "GAME SCREEN 3D") == 0 &&
+                  all[18].choices.size() == 4 && std::strcmp(all[18].choices[0], "OFF") == 0 &&
+                  std::strcmp(all[18].choices[3], "HIGH") == 0,
               "the game screen's depth under its size: OFF, LOW, MEDIUM, HIGH");
         // Webs are always physical (the user, October 15: "remove non physical web, no need for it").
         for (const auto& row : all)
             check(std::strcmp(row.title, "PHYSICAL WEBS") != 0, "webs can still be made non-physical");
-        check(all[13].item == Item::view && std::strcmp(all[13].title, "VR VIEW") == 0 && all[13].choices.size() == 2 &&
-                  std::strcmp(all[13].choices[0], "VR") == 0 && std::strcmp(all[13].choices[1], "GAME SCREEN") == 0,
+        check(all[16].item == Item::view && std::strcmp(all[16].title, "VR VIEW") == 0 && all[16].choices.size() == 2 &&
+                  std::strcmp(all[16].choices[0], "VR") == 0 && std::strcmp(all[16].choices[1], "GAME SCREEN") == 0,
               "the view above the game screen's rows: VR, or GAME SCREEN");
         // VR VIEW is on the pause menu's first page, beside RESUME, and no other row is.
         for (const auto& row : all)
@@ -9896,10 +10037,28 @@ int main() {
               "the web button under the web style: GRIP, or TRIGGER");
         check(all[3].item == Item::aimMarkers && all[4].item == Item::airWebs, "the aim markers, then the air webs");
         check(all[6].item == Item::swingSpeed && all[7].item == Item::weight, "SWINGING: the swing speed, the weight");
-        check(all[9].item == Item::snapTurn && all[10].item == Item::smoothTurn && all[11].item == Item::haptics,
+        check(all[8].item == Item::armSensitivity && all[8].choices.size() == std::size(armSensitivities) &&
+                  all[9].item == Item::swingAssist && all[9].choices.size() == 4 && all[10].item == Item::webAlign &&
+                  all[10].choices.size() == 3 && std::strcmp(all[10].choices[2], "BODY + VIEW") == 0,
+              "SWINGING then: arm sensitivity, swing assist, web align");
+        check(all[20].item == Item::recordingView && all[21].item == Item::recordingFov &&
+                  all[21].choices.size() == std::size(recordingFovs),
+              "DISPLAY ends with the recording view and its FOV");
+        {
+            Values v;
+            check(v.armSensitivity == 100 && choice(Item::armSensitivity, v) == 2 && v.swingAssist == 0 &&
+                      v.webAlign == 0 && v.recordingView == 1 && v.recordingFov == 90 &&
+                      choice(Item::recordingFov, v) == 3 && choose(Item::armSensitivity, 6, v) &&
+                      v.armSensitivity == 300 && armFactor(v.armSensitivity) == 3.f &&
+                      choose(Item::swingAssist, 3, v) && assistRate(v.swingAssist) == 6.f &&
+                      !choose(Item::webAlign, 3, v) &&
+                      sanitized(Values{.armSensitivity = 9000, .swingAssist = 9}).armSensitivity == 400,
+                  "the new settings' defaults, steps and ranges");
+        }
+        check(all[12].item == Item::snapTurn && all[13].item == Item::smoothTurn && all[14].item == Item::haptics,
               "COMFORT: snap and smooth turning, the vibration");
-        check(all[18].item == Item::calibrate && all[18].choices.size() == 2 &&
-                  std::strcmp(all[18].choices[1], "ON RESUME") == 0,
+        check(all[23].item == Item::calibrate && all[23].choices.size() == 2 &&
+                  std::strcmp(all[23].choices[1], "ON RESUME") == 0,
               "the body's calibration: NO, or ON RESUME");
         // Every setting has a row but the wall view, which the launcher's one
         // "Wall running" now carries along with who holds you on the wall.

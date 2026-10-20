@@ -918,11 +918,13 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingSettings(void* input) {
     uint32_t header[3]{};
     if (!copy(header, input, sizeof(header)) ||
         (header[2] != settingsBytesV3 && header[2] != settingsBytesV4 && header[2] != settingsBytesV5 &&
-         header[2] != settingsBytesV6 && header[2] != sizeof(s)) ||
+         header[2] != settingsBytesV6 && header[2] != settingsBytesV7 && header[2] != sizeof(s)) ||
         !copy(&s, input, header[2]) || s.magic != 0x53575354 ||
         !((s.version == 3 && s.bytes == settingsBytesV3) || (s.version == 4 && s.bytes == settingsBytesV4) ||
           (s.version == 5 && s.bytes == settingsBytesV5) || (s.version == 6 && s.bytes == settingsBytesV6) ||
-          (s.version == 7 && s.bytes == sizeof(s))) ||
+          (s.version == 7 && s.bytes == settingsBytesV7) || (s.version == 8 && s.bytes == sizeof(s))) ||
+        !std::isfinite(s.armSensitivity) || s.armSensitivity <= 0 || s.armSensitivity > 10 ||
+        !std::isfinite(s.swingAssist) || s.swingAssist < 0 || s.swingAssist > 20 ||
         s.noBlows > 3 || s.arcade > 1 ||
         s.grab > 1 || !std::isfinite(s.maxSpeed) || s.maxSpeed <= 0 || s.maxSpeed > motionSpeedLimit ||
         s.airWebs > 1 || !std::isfinite(s.gravity) || s.gravity < 0 || s.gravity > maxGravity || s.walls > 4 ||
@@ -960,6 +962,10 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingSettings(void* input) {
         noBlows = s.version >= 6 ? s.noBlows : 0u;
         if (s.version >= 7)
             solver.allowArcade(s.arcade != 0);
+        if (s.version >= 8) {
+            solver.setArmSensitivity(s.armSensitivity);
+            solver.setSwingAssist(s.swingAssist);
+        }
         // A swing started without the grab (-NoWebGrab) offers it from now on.
         if (s.grab && !game_grab::offering() && driveMotion && sampleDriven) {
             config.grabKinds = game_grab::movableKinds;

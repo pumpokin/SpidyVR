@@ -67,6 +67,20 @@ struct Values {
     // swings stay above the street. Off, REALISTIC: webs are ropes that bend
     // round whatever comes between you and where they stick.
     bool arcadeWebs = false;
+    // How much your arm's motion counts for while a web holds you, percent
+    // (the tab's ARM SENSITIVITY; SwingConfig::armSensitivity): higher, a
+    // smaller, slower pull drags you along the web and a gentler yank zips.
+    int armSensitivity = 100;
+    // SWING ASSIST (SwingConfig::swingAssist): 0 off, 1 low, 2 medium, 3 high.
+    int swingAssist = 0;
+    // WEB ALIGN (web_align.hpp): 0 off, 1 the body leans up the web, 2 the
+    // view leans with it.
+    int webAlign = 0;
+    // RECORDING VIEW (mirror_camera.hpp): what the game's window shows of
+    // the left eye in VR - 0 raw, 1 smooth, 2 steady (level horizon) - and
+    // RECORDING FOV, how wide it sees, degrees across.
+    int recordingView = 1;
+    int recordingFov = 90;
     bool operator==(const Values&) const = default;
 };
 // The steps the game's Settings offer. The launcher's slider sets any swing
@@ -77,6 +91,20 @@ inline constexpr int smoothTurns[] = {0, 60, 90, 120, 180, 240};
 inline constexpr int hapticLevels[] = {0, 25, 50, 75, 100};
 inline constexpr int weights[] = {40, 60, 80, 100, 125, 150, 200, 250, 300};
 inline constexpr int flipSpeeds[] = {90, 120, 150, 180, 240, 300, 360, 480};
+inline constexpr int armSensitivities[] = {50, 75, 100, 125, 150, 200, 300};
+inline constexpr int swingAssists[] = {0, 1, 2, 3};
+inline constexpr int webAligns[] = {0, 1, 2};
+inline constexpr int recordingViews[] = {0, 1, 2};
+inline constexpr int recordingFovs[] = {60, 70, 80, 90, 100, 110};
+// The swing's factor for an ARM SENSITIVITY percent.
+inline float armFactor(int percent) {
+    return static_cast<float>(percent < 25 ? 25 : percent > 400 ? 400 : percent) / 100;
+}
+// The swing's assist rate (per second) for a SWING ASSIST choice.
+inline float assistRate(int choice) {
+    constexpr float rates[] = {0, 1.5f, 3, 6};
+    return rates[choice < 0 ? 0 : choice > 3 ? 3 : choice];
+}
 // Real gravity, m/s^2: a weight of 100% falls at it.
 inline constexpr float realGravity = 9.81f;
 // The swing's gravity for a weight, m/s^2.
@@ -125,8 +153,13 @@ enum class Item : uint8_t {
     screenDepth,
     view,
     webStyle,
+    armSensitivity,
+    swingAssist,
+    webAlign,
+    recordingView,
+    recordingFov,
 };
-inline constexpr Item lastItem = Item::webStyle;
+inline constexpr Item lastItem = Item::recordingFov;
 // The SPIDY VR tab, top to bottom: a section's heading (item none) or a
 // setting. The sections: WEBS, SWINGING, COMFORT, DISPLAY, BODY and
 // EXPERIMENTAL (the player, October 19: "sort the options in spidy vr
@@ -143,7 +176,7 @@ struct Row {
     // menu (the one with resume)").
     bool page{};
 };
-const std::array<Row, 22>& rows();
+const std::array<Row, 27>& rows();
 // The choice a setting shows for these values: a switch 0 (off) or 1 (on), a
 // list its step nearest to the value (a launcher value between two steps
 // shows the nearer one, the lower on a tie).
