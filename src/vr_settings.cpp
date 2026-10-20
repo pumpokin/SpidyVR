@@ -35,9 +35,11 @@ constexpr const char* recordingFovChoices[] = {"60\xC2\xB0", "70\xC2\xB0", "80\x
                                                "90\xC2\xB0", "100\xC2\xB0", "110\xC2\xB0"};
 constexpr const char* lightFirmChoices[] = {"LIGHT", "MEDIUM", "FIRM"};
 constexpr const char* dodgeAssistChoices[] = {"OFF", "AIM", "AUTO"};
+constexpr const char* cutsceneChoices[] = {"GAME SCREEN", "FIRST PERSON"};
 static_assert(std::size(lightFirmChoices) == std::size(indexGrips) &&
               std::size(lightFirmChoices) == std::size(indexPads) &&
-              std::size(dodgeAssistChoices) == std::size(dodgeAssists));
+              std::size(dodgeAssistChoices) == std::size(dodgeAssists) &&
+              std::size(cutsceneChoices) == std::size(cutsceneModes));
 static_assert(std::size(armChoices) == std::size(armSensitivities) &&
               std::size(assistChoices) == std::size(swingAssists) && std::size(alignChoices) == std::size(webAligns) &&
               std::size(recordingViewChoices) == std::size(recordingViews) &&
@@ -88,6 +90,8 @@ std::span<const int> steps(Item item) {
         return indexPads;
     case Item::dodgeAssist:
         return dodgeAssists;
+    case Item::cutscenes:
+        return cutsceneModes;
     default:
         return {};
     }
@@ -128,6 +132,8 @@ float numberOf(Item item, const Values& v) {
         return static_cast<float>(v.indexPad);
     case Item::dodgeAssist:
         return static_cast<float>(v.dodgeAssist);
+    case Item::cutscenes:
+        return static_cast<float>(v.cutscenes);
     default:
         return 0;
     }
@@ -175,11 +181,12 @@ Values sanitized(Values v) {
     v.indexGrip = std::clamp(v.indexGrip, 0, 2);
     v.indexPad = std::clamp(v.indexPad, 0, 2);
     v.dodgeAssist = std::clamp(v.dodgeAssist, 0, 2);
+    v.cutscenes = std::clamp(v.cutscenes, 0, 1);
     return v;
 }
-const std::array<Row, 31>& rows() {
+const std::array<Row, 32>& rows() {
     // The help fits the game's description column beside the rows.
-    static const std::array<Row, 31> all{{
+    static const std::array<Row, 32> all{{
         {Item::none, "WEBS", nullptr, {}},
         {Item::webStyle, "WEB STYLE",
          "Arcade: webs pass lamp posts, signs and cars, and swings stay above the street.", webStyleChoices},
@@ -222,6 +229,8 @@ const std::array<Row, 31>& rows() {
          "What your monitor shows in VR. SMOOTH and STEADY calm head shake.", recordingViewChoices},
         {Item::recordingFov, "RECORDING FOV", "How wide your monitor's view is. Your headset view stays the same.",
          recordingFovChoices},
+        {Item::cutscenes, "CUTSCENES",
+         "FIRST PERSON: see scenes from Spider-Man's eyes where he is in them.", cutsceneChoices},
         {Item::none, "COMBAT", nullptr, {}},
         {Item::dodgeAssist, "DODGE ASSIST",
          "AIM: B at a Spider-Sense dodges away from him. AUTO: dodges red, jumps yellow.", dodgeAssistChoices},
@@ -311,6 +320,9 @@ bool choose(Item item, int index, Values& v) {
         break;
     case Item::dodgeAssist:
         v.dodgeAssist = s[index];
+        break;
+    case Item::cutscenes:
+        v.cutscenes = s[index];
         break;
     default:
         return false;

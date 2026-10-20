@@ -41,6 +41,7 @@
 #include "spidy/web_align.hpp"
 #include "spidy/dodge_assist.hpp"
 #include "spidy/suit_power.hpp"
+#include "spidy/scene_view.hpp"
 #include "spidy/wrist_hud.hpp"
 #include "spidy/xr_layers.hpp"
 #include "spidy/xr_session.hpp"
@@ -487,7 +488,8 @@ void keepSettings(const vr_settings::Values& v) {
                              "\nrecording_fov=" + std::to_string(v.recordingFov) +
                              "\nindex_grip=" + std::to_string(v.indexGrip) +
                              "\nindex_pad=" + std::to_string(v.indexPad) +
-                             "\ndodge_assist=" + std::to_string(v.dodgeAssist) + "\n";
+                             "\ndodge_assist=" + std::to_string(v.dodgeAssist) +
+                             "\ncutscenes=" + std::to_string(v.cutscenes) + "\n";
     DWORD written{};
     WriteFile(file, text.data(), static_cast<DWORD>(text.size()), &written, nullptr);
     CloseHandle(file);
@@ -901,12 +903,13 @@ DWORD WINAPI run(void*) {
             values.indexGrip = keptSetting(kept, "index_grip", values.indexGrip);
             values.indexPad = keptSetting(kept, "index_pad", values.indexPad);
             values.dodgeAssist = keptSetting(kept, "dodge_assist", values.dodgeAssist);
+            values.cutscenes = keptSetting(kept, "cutscenes", values.cutscenes);
         }
         values = vr_settings::sanitized(values);
         // What settings.txt holds, so a change writes it once.
         int keptArm = values.armSensitivity, keptAssist = values.swingAssist, keptAlign = values.webAlign,
             keptView = values.recordingView, keptFov = values.recordingFov, keptGrip = values.indexGrip,
-            keptPad = values.indexPad, keptDodge = values.dodgeAssist;
+            keptPad = values.indexPad, keptDodge = values.dodgeAssist, keptScenes = values.cutscenes;
         // WEB ALIGN: the lean up the web (web_align.hpp).
         web_align::WebAlign webAlign;
         // The recording view's camera (mirror_camera.hpp), and when the image
@@ -1022,6 +1025,10 @@ DWORD WINAPI run(void*) {
         // The suit power by crossing the arms and flinging them out
         // (suit_power.hpp), and how long its L3 + R3 is still held.
         suit_power::Gesture suitGesture;
+        // CUTSCENES: FIRST PERSON (scene_view.hpp): the eyes at Spider-Man's
+        // while the game plays a scene, and the frames shown so.
+        scene_view::SceneView sceneView;
+        uint64_t firstPersonFrames{};
         float suitHeld{};
         uint32_t suitPowers{};
         uint32_t autoDodgesBefore{};
@@ -1634,6 +1641,21 @@ DWORD WINAPI run(void*) {
                     const bool scene =
                         scenePanel.wanted(screen && values.screenDepth > 0 && player.hero && bridgeRunning && timeRuns,
                                           native_hud::onScreen(sceneHoldMs), GetTickCount64());
+                    // CUTSCENES: FIRST PERSON: a scene the game plays (time runs, a
+                    // player) seen from Spider-Man's eyes while the game poses him
+                    // near its camera; else on its screen, as before.
+                    scene_view::Out sceneEyes{};
+                    scene_view::Head sceneHead{};
+                    bool firstPersonScene = false;
+                    if (screen && values.cutscenes == scene_view::firstPerson && player.hero && bridgeRunning &&
+                        timeRuns && bodyStarted && validTrackedPose(frame.head)) {
+                        native_body::sceneHead(sceneHead);
+                        firstPersonScene = sceneView.update(GetTickCount64(), sceneHead,
+                                                            {camera[12], camera[13], camera[14]}, frame.head,
+                                                            {frame.eyes[0].pose, frame.eyes[1].pose}, sceneEyes);
+                    } else if (!screen) {
+                        sceneView.reset();
+                    }
                     // On the screen the controllers are the game's Xbox
                     // controller; in VR it gets Start (menu), Back (X) and
                     // the native walking, jumping, dodge and interact
@@ -1688,7 +1710,9 @@ DWORD WINAPI run(void*) {
                         if (values.armSensitivity != keptArm || values.swingAssist != keptAssist ||
                             values.webAlign != keptAlign || values.recordingView != keptView ||
                             values.recordingFov != keptFov || values.indexGrip != keptGrip ||
-                            values.indexPad != keptPad || values.dodgeAssist != keptDodge) {
+                            values.indexPad != keptPad || values.dodgeAssist != keptDodge ||
+                            values.cutscenes != keptScenes) {
+                            keptScenes = values.cutscenes;
                             keptGrip = values.indexGrip;
                             keptPad = values.indexPad;
                             keptDodge = values.dodgeAssist;
@@ -3076,7 +3100,7 @@ DWORD WINAPI run(void*) {
                     // Without gameplay the screen shows the game's presented
                     // frame; until it is up, the last image stays. The eye
                     // views get no command and stop rendering meanwhile.
-                    if (!vrPlay && !scene)
+                    if (!vrPlay && !scene && !firstPersonScene)
                         return screen || gameScreen.holding();
                     if (!nativeStarted) {
                         struct NativeConfig {
@@ -3128,6 +3152,49 @@ DWORD WINAPI run(void*) {
                         // Initialization can exceed one predicted display
                         // interval. A scene's screen keeps the game's frame.
                         return !vrPlay;
+                    }
+                    if (!vrPlay && firstPersonScene) {
+                        // The scene from Spider-Man's eyes: immersive eyes at his
+                        // head, moved with him to the frame rendered, and the HUD's
+                        // panel (the subtitles) in front of the player's head.
+                        native_eyes::Command eyes;
+                        eyes.enabled = 1;
+                        eyes.serial = ++serial;
+                        eyes.leaseMs = 250;
+                        eyes.anchor = sceneHead.feet;
+                        eyes.anchored = 1;
+                        GameMotionFrame scene{};
+                        scene.active = true;
+                        scene.predictedDisplayTime = frame.predictedDisplayTime;
+                        scene.anchor = sceneHead.feet;
+                        scene.headPose = sceneEyes.head;
+                        scene.head = scene_view::nativePose(sceneEyes.head);
+                        for (unsigned i = 0; i < 2; ++i) {
+                            eyes.eyes[i].world = sceneEyes.native[i];
+                            const auto& f = frame.eyes[i].fov;
+                            eyes.eyes[i].fov[0] = f.left;
+                            eyes.eyes[i].fov[1] = f.right;
+                            eyes.eyes[i].fov[2] = f.down;
+                            eyes.eyes[i].fov[3] = f.up;
+                            scene.eyes[i] = sceneEyes.native[i];
+                            scene.fovs[i] = f;
+                        }
+                        const Quat hudFacing = hudFollow.update(frame.head.orientation, frame.seconds);
+                        native_hud::follow(eyes.serial, frame.head.orientation.conjugate() * hudFacing);
+                        NativeEyeFrame saved;
+                        saved.serial = eyes.serial;
+                        saved.motion = scene;
+                        saved.trackingEyes = frame.eyes;
+                        saved.screenPose = screenPose;
+                        saved.screenAspect = SpidyFlatAspect();
+                        history.remember(saved);
+                        ++firstPersonFrames;
+                        // The headset shows these eyes, not the screen.
+                        showScreen = false;
+                        const auto code = SpidySetEyes(&eyes);
+                        if (code && code != 4003)
+                            check(code, "Scene first-person eye command");
+                        return !code;
                     }
                     if (!vrPlay) {
                         // The scene's two eyes: the game's own camera, set apart

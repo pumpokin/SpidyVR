@@ -89,6 +89,9 @@ struct Values {
     // DODGE ASSIST (dodge_assist.hpp): 0 off, 1 aim (B at a warning dodges
     // away from the attacker), 2 auto (red warnings dodge, yellow jump).
     int dodgeAssist = 1;
+    // CUTSCENES (scene_view.hpp): 0 on the game screen, 1 in first person,
+    // from Spider-Man's eyes where the scene has him.
+    int cutscenes = 1;
     bool operator==(const Values&) const = default;
 };
 // The steps the game's Settings offer. The launcher's slider sets any swing
@@ -107,6 +110,7 @@ inline constexpr int recordingFovs[] = {60, 70, 80, 90, 100, 110};
 inline constexpr int indexGrips[] = {0, 1, 2};
 inline constexpr int indexPads[] = {0, 1, 2};
 inline constexpr int dodgeAssists[] = {0, 1, 2};
+inline constexpr int cutsceneModes[] = {0, 1};
 // What INDEX GRIP multiplies the Index's grip force by.
 inline float gripGain(int choice) {
     constexpr float gains[] = {3, 2, 1};
@@ -177,8 +181,9 @@ enum class Item : uint8_t {
     indexGrip,
     indexPad,
     dodgeAssist,
+    cutscenes,
 };
-inline constexpr Item lastItem = Item::dodgeAssist;
+inline constexpr Item lastItem = Item::cutscenes;
 // The SPIDY VR tab, top to bottom: a section's heading (item none) or a
 // setting. The sections: WEBS, SWINGING, COMFORT, DISPLAY, BODY and
 // EXPERIMENTAL (the player, October 19: "sort the options in spidy vr
@@ -195,7 +200,7 @@ struct Row {
     // menu (the one with resume)").
     bool page{};
 };
-const std::array<Row, 31>& rows();
+const std::array<Row, 32>& rows();
 // The choice a setting shows for these values: a switch 0 (off) or 1 (on), a
 // list its step nearest to the value (a launcher value between two steps
 // shows the nearer one, the lower on a tie).

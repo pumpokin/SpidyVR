@@ -1,6 +1,7 @@
 #pragma once
 #include "body_calibration.hpp"
 #include "math.hpp"
+#include "scene_view.hpp"
 #include <cstddef>
 #include <cstdint>
 
@@ -134,6 +135,10 @@ void renderFrame();
 // The body turned the hero's joints in the last moments, its head shrunk:
 // the eyes may draw the hero. Otherwise they hide it, as before the body.
 bool drawn();
+// Spider-Man's head as the game itself posed him last, before the body
+// changed anything (cutscenes in first person: scene_view.hpp): between his
+// eyes and where his face points, in the world. False before any pose.
+bool sceneHead(scene_view::Head& out);
 Status status();
 // Where the hero's shoulders and wrists are at his own size, from the rig of
 // his latest pose job; false (and `out` untouched) before one was read.

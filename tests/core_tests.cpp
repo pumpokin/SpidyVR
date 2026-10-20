@@ -15,6 +15,7 @@
 #include "spidy/phone.hpp"
 #include "spidy/controller_layout.hpp"
 #include "spidy/tutorial.hpp"
+#include "spidy/scene_view.hpp"
 #include "spidy/suit_power.hpp"
 #include "spidy/dodge_assist.hpp"
 #include "spidy/index_pads.hpp"
@@ -3436,6 +3437,43 @@ int main() {
         for (int i=0;i<150;++i)
             late.update(.011f,head,{0,1.2f,-.3f},{0,1.2f,-.3f},true);
         check(!late.update(.011f,head,{-.6f,1.4f,-.2f},{.6f,1.4f,-.2f},true).fired,"too late to fling");
+    });
+    test("cutscenes in first person: at his eyes, the player's own look, a snap turn when he turns or cuts", [] {
+        using namespace scene_view;
+        SceneView v;
+        Out o;
+        // Spider-Man at (10, 0, 0) looking along +x; the player looks ahead (-z).
+        Head h{true,1000,{10,1.7f,0},{1,0,0},{10,0,0}};
+        const Pose head{{0,1.7f,0},{}};
+        const std::array<Pose,2> eyes{Pose{{-.032f,1.7f,0},{}},Pose{{.032f,1.7f,0},{}}};
+        check(v.update(1010,h,{12,2,3},head,eyes,o) && o.realigned,"a scene with him in it: first person");
+        check(length(o.head.position-h.eyes)<1e-4f,"at his eyes");
+        check(o.head.orientation.rotate({0,0,-1}).x>.99f,"facing where he faces");
+        near(length(o.eyes[1].position-o.eyes[0].position),.064f);
+        // The player turns his own head 90 degrees left: the view turns with him only.
+        const Pose turned{{0,1.7f,0},Quat::yaw(1.5708f)};
+        check(v.update(1020,h,{12,2,3},turned,eyes,o) && !o.realigned,"his own look");
+        check(o.head.orientation.rotate({0,0,-1}).z<-.99f,"looking 90 degrees left of Spider-Man");
+        // Spider-Man's head nods and turns a little: the view does not.
+        Head nod=h;nod.forward=normalized(Vec3{1,.3f,.4f});
+        check(v.update(1030,nod,{12,2,3},head,eyes,o) && !o.realigned,"small turns of his head turn nothing");
+        // He turns right round: one snap to match.
+        Head round=h;round.forward={-1,0,0};
+        check(v.update(1040,round,{12,2,3},head,eyes,o) && o.realigned &&
+                  o.head.orientation.rotate({0,0,-1}).x<-.99f,"he turns round: the view snaps with him");
+        // A cut: he jumps 20 m: a fresh start.
+        Head cut=h;cut.eyes={30,1.7f,0};
+        check(v.update(1050,cut,{31,2,1},head,eyes,o) && o.realigned,"a cut starts afresh");
+        // Far from the scene's camera (not in this shot): its screen.
+        check(!v.update(1060,cut,{200,2,0},head,eyes,o),"not in the shot: the screen");
+        // His head stops coming mid-scene: the rest of the scene stays on its screen.
+        SceneView w;
+        w.update(1000,h,{12,2,3},head,eyes,o);
+        check(!w.update(2000,h,{12,2,3},head,eyes,o),"a stale head: the screen");
+        Head again=h;again.tickMs=2000;
+        check(!w.update(2005,again,{12,2,3},head,eyes,o),"and it stays there for that scene");
+        w.reset();
+        check(w.update(2010,again,{12,2,3},head,eyes,o),"the next scene starts afresh");
     });
     test("virtual travel cannot trigger yank", [] {
         TestWorld w;
@@ -10097,7 +10135,7 @@ int main() {
         // The sections (the player, October 19: "sort the options in spidy vr
         // settings ingame into nice sections"), each with a setting in the tab.
         const std::pair<size_t, const char*> sections[] = {{0, "WEBS"},     {5, "SWINGING"}, {11, "COMFORT"},  {17, "DISPLAY"},
-                                                           {24, "COMBAT"},  {26, "BODY"},    {28, "EXPERIMENTAL"}};
+                                                           {25, "COMBAT"},  {27, "BODY"},    {29, "EXPERIMENTAL"}};
         check(headings == std::size(sections), "the sections: webs, swinging, comfort, display, body, experimental");
         for (const auto& [at, title] : sections) {
             check(all[at].item == Item::none && std::strcmp(all[at].title, title) == 0, "a section out of place");
@@ -10106,9 +10144,9 @@ int main() {
                 ++next;
             check(next < all.size() && all[next].item != Item::none, "a section with no setting in the tab");
         }
-        check(all[29].item == Item::flips && all[29].choices.empty() && std::strcmp(all[28].title, "EXPERIMENTAL") == 0,
+        check(all[30].item == Item::flips && all[30].choices.empty() && std::strcmp(all[29].title, "EXPERIMENTAL") == 0,
               "the flips: a switch under EXPERIMENTAL");
-        check(all.size() == 31 && all[30].item == Item::flipSpeed && all[30].choices.size() == std::size(flipSpeeds),
+        check(all.size() == 32 && all[31].item == Item::flipSpeed && all[31].choices.size() == std::size(flipSpeeds),
               "the flip speed under the flips, the last row");
         // The wall view has no row of its own any more: it turned only while
         // Spidy held the player on a wall, so it was never a choice of its own
@@ -10150,7 +10188,7 @@ int main() {
         check(all[22].item == Item::recordingView && all[23].item == Item::recordingFov &&
                   all[23].choices.size() == std::size(recordingFovs),
               "DISPLAY ends with the recording view and its FOV");
-        check(all[15].item == Item::indexGrip && all[16].item == Item::indexPad && all[25].item == Item::dodgeAssist &&
+        check(all[15].item == Item::indexGrip && all[16].item == Item::indexPad && all[26].item == Item::dodgeAssist && all[24].item == Item::cutscenes && Values{}.cutscenes == 1 &&
                   Values{}.indexGrip == 0 && Values{}.indexPad == 0 && Values{}.dodgeAssist == 1 &&
                   gripGain(0) == 3.f && gripGain(2) == 1.f,
               "COMFORT ends with the Index's grip and trackpads, light; COMBAT has the dodge assist, aim");
@@ -10167,8 +10205,8 @@ int main() {
         }
         check(all[12].item == Item::snapTurn && all[13].item == Item::smoothTurn && all[14].item == Item::haptics,
               "COMFORT: snap and smooth turning, the vibration");
-        check(all[27].item == Item::calibrate && all[27].choices.size() == 2 &&
-                  std::strcmp(all[27].choices[1], "ON RESUME") == 0,
+        check(all[28].item == Item::calibrate && all[28].choices.size() == 2 &&
+                  std::strcmp(all[28].choices[1], "ON RESUME") == 0,
               "the body's calibration: NO, or ON RESUME");
         // Every setting has a row but the wall view, which the launcher's one
         // "Wall running" now carries along with who holds you on the wall.

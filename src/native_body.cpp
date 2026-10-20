@@ -337,6 +337,9 @@ Cache& rigEntry(uintptr_t rig) {
     }
     return entry;
 }
+// The hero's head as the game posed it last (sceneHead).
+SRWLOCK headLock = SRWLOCK_INIT;
+scene_view::Head posedHead{};
 void solveHero(float* out, uintptr_t job, uintptr_t instance) {
     const auto rig = pointer(job + 0x28);
     float transform[16]{};
@@ -387,6 +390,30 @@ void solveHero(float* out, uintptr_t job, uintptr_t instance) {
             body::turnState(state, std::remainder(wanted.trackingYaw - trackingYaw, 6.2831853f));
         trackingYaw = wanted.trackingYaw;
         trackingYawSet = true;
+    }
+    // His head as the game posed it, before the body turns anything: the
+    // eyes of a cutscene in first person.
+    if (!problem && turned && cache.ik.head >= 0 && cache.ik.head < static_cast<int>(joints)) {
+        const body::Pose posed(out, static_cast<int>(joints));
+        const int head = cache.ik.head;
+        const int e0 = cache.ik.eyes[0], e1 = cache.ik.eyes[1];
+        const bool eyes = e0 >= 0 && e1 >= 0 && e0 < static_cast<int>(joints) && e1 < static_cast<int>(joints);
+        const Vec3 forward = posed.direction(head, cache.ik.headForward),
+                   up = posed.direction(head, cache.ik.headUp);
+        const Vec3 between = eyes ? (posed.position(e0) + posed.position(e1)) * .5f
+                                  : posed.position(head) + normalized(up) * .08f + normalized(forward) * .09f;
+        const Vec3 feet{transform[12], transform[13], transform[14]};
+        scene_view::Head h;
+        h.valid = finite(between) && finite(forward) && length(forward) > 1e-3f && finite(feet);
+        h.tickMs = GetTickCount64();
+        h.eyes = feet + toWorld.rotate(between);
+        h.forward = normalized(toWorld.rotate(forward));
+        h.feet = feet;
+        if (h.valid) {
+            AcquireSRWLockExclusive(&headLock);
+            posedHead = h;
+            ReleaseSRWLockExclusive(&headLock);
+        }
     }
     if (!problem && (on || state.weight > 0)) {
         if (on) {
@@ -596,6 +623,12 @@ void native_body::renderFrame() {
             d.turnMax = std::max(d.turnMax, turn);
         }
     });
+}
+bool native_body::sceneHead(scene_view::Head& out) {
+    AcquireSRWLockShared(&headLock);
+    out = posedHead;
+    ReleaseSRWLockShared(&headLock);
+    return out.valid;
 }
 bool native_body::drawn() {
     // The hero's joints are rewritten every frame; a pose that stopped
